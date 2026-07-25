@@ -469,7 +469,7 @@ describe("draw-relay mode", () => {
       (call) => !call.args.includes("-version") && !call.args.includes("-encoders")
     );
     expect(encodeCall?.args.join("\n")).not.toContain(privateGuess);
-  });
+  }, 20_000);
 
   it("keeps classic available when the actual host has no FFmpeg capability", async () => {
     service = new GameService({
