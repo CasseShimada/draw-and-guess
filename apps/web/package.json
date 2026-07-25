@@ -1,0 +1,29 @@
+{
+  "name": "@draw-guess/web",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./App": "./src/App.tsx",
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@draw-guess/content": "workspace:*",
+    "@draw-guess/protocol": "workspace:*",
+    "@draw-guess/shared-types": "workspace:*",
+    "@vitejs/plugin-react": "6.0.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "vite": "8.1.5"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.4"
+  }
+}

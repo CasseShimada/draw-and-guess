@@ -1,0 +1,250 @@
+name: Desktop release artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  make:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            target_arch: x64
+          - name: macOS arm64
+            os: macos-14
+            target_arch: arm64
+          - name: macOS x64
+            os: macos-15-intel
+            target_arch: x64
+          - name: Linux x64
+            os: ubuntu-24.04
+            target_arch: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install Linux maker and smoke dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot rpm xvfb
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Validate source
+        run: corepack pnpm check
+
+      - name: Prepare Windows signing certificate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            $certificatePath = Join-Path $env:RUNNER_TEMP "draw-guess-signing.pfx"
+            [IO.File]::WriteAllBytes(
+              $certificatePath,
+              [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+            )
+            "WINDOWS_CERTIFICATE_FILE=$certificatePath" |
+              Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Prepare Apple signing keychain
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -n "$APPLE_CERTIFICATE_BASE64" ]]; then
+            certificate_path="$RUNNER_TEMP/draw-guess-signing.p12"
+            keychain_path="$RUNNER_TEMP/draw-guess-signing.keychain-db"
+            keychain_password="$(openssl rand -hex 24)"
+            node -e \
+              "require('fs').writeFileSync(process.argv[1], Buffer.from(process.env.APPLE_CERTIFICATE_BASE64, 'base64'))" \
+              "$certificate_path"
+            security create-keychain -p "$keychain_password" "$keychain_path"
+            security set-keychain-settings -lut 21600 "$keychain_path"
+            security unlock-keychain -p "$keychain_password" "$keychain_path"
+            security import "$certificate_path" \
+              -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 \
+              -k "$keychain_path"
+            security set-key-partition-list \
+              -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+            security list-keychains -d user -s \
+              "$keychain_path" \
+              $(security list-keychains -d user | tr -d '"')
+            echo "DRAW_GUESS_CI_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+            echo "DRAW_GUESS_CI_CERTIFICATE=$certificate_path" >> "$GITHUB_ENV"
+          fi
+
+      - name: Make installers and retain build log (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force apps/desktop/out | Out-Null
+          corepack pnpm desktop:make *>&1 |
+            Tee-Object -FilePath apps/desktop/out/build.log
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Make installers and retain build log (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/out
+          set -o pipefail
+          corepack pnpm desktop:make 2>&1 |
+            tee apps/desktop/out/build.log
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Launch packaged application
+        if: runner.os != 'Linux'
+        run: corepack pnpm desktop:smoke
+
+      - name: Launch packaged application on Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run -a corepack pnpm desktop:smoke
+
+      - name: Remove temporary Windows signing material
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP "draw-guess-signing.pfx"
+          Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+
+      - name: Remove temporary Apple signing material
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [[ -n "${DRAW_GUESS_CI_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$DRAW_GUESS_CI_KEYCHAIN" || true
+            rm -f -- "$DRAW_GUESS_CI_KEYCHAIN"
+          fi
+          if [[ -n "${DRAW_GUESS_CI_CERTIFICATE:-}" ]]; then
+            rm -f -- "$DRAW_GUESS_CI_CERTIFICATE"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: draw-guess-${{ runner.os }}-${{ matrix.target_arch }}
+          path: |
+            apps/desktop/out/make/**
+            apps/desktop/out/SHA256SUMS.txt
+            apps/desktop/out/build.log
+          if-no-files-found: error
+
+  release:
+    name: Publish prerelease
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: make
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-input
+
+      - name: Prepare user downloads and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-files
+
+          while IFS= read -r -d '' artifact; do
+            relative="${artifact#release-input/}"
+            platform="${relative%%/*}"
+            filename="$(basename "$artifact")"
+            cp -- "$artifact" "release-files/${platform}-${filename}"
+          done < <(
+            find release-input -type f \
+              \( -iname '*.exe' -o -iname '*.zip' -o -iname '*.dmg' \
+                 -o -iname '*.deb' -o -iname '*.rpm' \) \
+              -print0
+          )
+
+          if ! find release-files -type f -print -quit | grep -q .; then
+            echo "No user-facing release files were produced." >&2
+            exit 1
+          fi
+
+          (
+            cd release-files
+            sha256sum -- * > SHA256SUMS.txt
+          )
+
+      - name: Write user release notes
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          这是 0.4.0 的首个预发布测试版，建议先在小范围游戏中体验并反馈问题。
+
+          ## 新玩法
+
+          - **参考图临摹**：所有玩家同时根据同一张参考图作画，结束后匿名浏览作品并为喜欢的作品点赞；最高票作品共同获胜。
+          - **绘画接龙**：按随机顺序在“看词作画”和“看画猜词”之间传递，结束后可以查看完整过程并由主机生成本地视频回放。
+          - **经典你画我猜**：继续支持轮流选词、绘画、猜词和计分。
+
+          ## 体验改进
+
+          - 主机可以暂停和恢复正在进行的游戏，恢复后会从剩余时间继续。
+          - 房主可以切换玩法，也可以帮助当前玩家执行 Pass。
+          - 每次绘画结束前增加 10 秒展示调整时间，方便把外部绘图软件中的画面摆放完整。
+          - 画手可以看到服务器实际收到的展示画面，减少最终展示与本地预览不一致的情况。
+          - 绘制时间可按秒设置，范围为 1 秒至 3 小时。
+
+          ## 下载与使用
+
+          - Windows x64：下载 `.exe` 安装程序或 `.zip` 便携包。
+          - macOS：Apple 芯片请选择 arm64，Intel Mac 请选择 x64。
+          - Linux x64：可选择 `.deb`、`.rpm` 或 `.zip`。
+          - 绘画接龙只有负责开房的主机需要自行安装 FFmpeg；其他玩家不需要。
+          - 这是预发布版本，安装时可能出现系统安全提醒。重要游戏前建议先创建测试房间确认采集和网络连接正常。
+
+          `SHA256SUMS.txt` 可用于核对下载文件是否完整。
+          EOF
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-files/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "画猜现场 0.4.0 预发布版 1" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --prerelease \
+            --verify-tag

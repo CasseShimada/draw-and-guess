@@ -1,0 +1,30 @@
+export const CONTENT_LIMITS = {
+  wordPackFileBytes: 2 * 1024 * 1024,
+  wordPackNameCharacters: 80,
+  wordPackDescriptionCharacters: 500,
+  wordPackAuthorCharacters: 80,
+  wordPackLanguageCharacters: 35,
+  categoriesPerPack: 100,
+  categoryNameCharacters: 40,
+  wordsPerPack: 10_000,
+  wordCharacters: 40,
+  aliasesPerWord: 8,
+  localWordPacks: 200,
+  selectedPacks: 50,
+  selectedCategories: 500,
+  selectedWords: 10_000,
+  wordPoolUploadBytes: 4 * 1024 * 1024,
+  minimumPlayableWords: 3,
+  avatarBytes: 512 * 1024,
+  avatarInputBytes: 10 * 1024 * 1024,
+  avatarDimension: 256,
+  avatarInputMaxDimension: 4096,
+  avatarInputMaxPixels: 16_777_216,
+  roomAvatarBytes: 12 * 1024 * 1024,
+  themeCssBytes: 512 * 1024,
+  themeAssetBytes: 5 * 1024 * 1024,
+  themeTotalAssetBytes: 25 * 1024 * 1024,
+  themeAssetFiles: 200
+} as const;
+
+export const WORD_PACK_FILE_EXTENSION = ".drawguess-words.json";

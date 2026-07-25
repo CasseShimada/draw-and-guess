@@ -1,0 +1,43 @@
+{
+  "name": "draw-guess",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build:packages": "corepack pnpm --filter @draw-guess/content build && corepack pnpm --filter @draw-guess/shared-types build && corepack pnpm --filter @draw-guess/game-rules build && corepack pnpm --filter @draw-guess/protocol build && corepack pnpm --filter @draw-guess/capture-core build",
+    "dev": "corepack pnpm build:packages && corepack pnpm --filter @draw-guess/web build && corepack pnpm --filter @draw-guess/server build && corepack pnpm --filter @draw-guess/desktop dev",
+    "desktop:dev": "corepack pnpm dev",
+    "dev:web": "corepack pnpm build:packages && concurrently -k -n server,web -c cyan,magenta \"corepack pnpm --filter @draw-guess/server dev\" \"corepack pnpm --filter @draw-guess/web dev\"",
+    "build": "corepack pnpm build:packages && corepack pnpm --filter @draw-guess/web build && corepack pnpm --filter @draw-guess/server build && corepack pnpm --filter @draw-guess/desktop build",
+    "desktop:package": "corepack pnpm build && corepack pnpm --filter @draw-guess/desktop package",
+    "desktop:make": "corepack pnpm build && corepack pnpm --filter @draw-guess/desktop make && corepack pnpm --filter @draw-guess/desktop checksums",
+    "desktop:smoke": "corepack pnpm --filter @draw-guess/desktop test:e2e",
+    "test": "vitest run",
+    "lint": "eslint . && prettier --check .",
+    "typecheck": "corepack pnpm -r typecheck",
+    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "8.18.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "concurrently": "10.0.3",
+    "eslint": "9.39.5",
+    "globals": "17.7.0",
+    "pnpm": "11.17.0",
+    "prettier": "3.9.6",
+    "tsx": "4.23.1",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10"
+  }
+}

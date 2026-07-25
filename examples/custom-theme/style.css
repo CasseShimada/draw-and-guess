@@ -1,0 +1,42 @@
+/*
+ * 画猜现场本地主题示例
+ * 导入器会自动把普通选择器限制在可主题根节点中。
+ */
+
+:root {
+  --ink: #e9ecff;
+  --paper: #171927;
+  --paper-light: #23263a;
+  --coral: #ff7b72;
+  --coral-dark: #ff9b91;
+  --teal: #6ee7d8;
+  --yellow: #ffd866;
+  --line: #8188b8;
+  --muted: #b3b8d6;
+  --shadow: 5px 5px 0 #090a10;
+}
+
+[data-ui="home-intro"],
+[data-ui="topbar"],
+[data-ui="game-settings"],
+[data-ui="scoreboard"],
+[data-ui="word-pool-settings"] {
+  background: linear-gradient(135deg, #23263a, #191b2b);
+}
+
+[data-ui="player-row"] {
+  border-color: color-mix(in srgb, var(--line), transparent 35%);
+}
+
+[data-ui="drawing-board"] {
+  border-radius: 14px;
+  box-shadow: 0 0 0 3px var(--teal);
+}
+
+/*
+ * 本地素材示例（取消注释前创建相对于本 CSS 的 assets/paper.png）：
+ *
+ * [data-ui="home-intro"] {
+ *   background-image: url("./assets/paper.png");
+ * }
+ */
