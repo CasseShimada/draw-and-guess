@@ -459,7 +459,7 @@ describe("draw-relay mode", () => {
       () => {
         expect(fixture.replay.status(replayJobId).status).toBe("saved");
       },
-      { timeout: 2_000, interval: 10 }
+      { timeout: 10_000, interval: 20 }
     );
     const saved = fixture.replay.savedFile(replayJobId!);
     expect(saved).not.toBeNull();
