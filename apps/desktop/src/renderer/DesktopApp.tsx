@@ -1123,13 +1123,22 @@ export function DesktopApp() {
     const target = settings.currentClientTarget;
     return {
       resume: () => window.drawGuessDesktop.game.resume(target),
-      createRoom: (nickname, password) =>
-        window.drawGuessDesktop.game.createRoom({
-          target,
-          confirmInsecureHttp: false,
+      createRoom: async (nickname, password) => {
+        const response = await window.drawGuessDesktop.game.createRoom({
           nickname,
           password
-        }),
+        });
+        setServerStatus(response.server);
+        setSettings((current) =>
+          current
+            ? {
+                ...current,
+                currentClientTarget: response.target
+              }
+            : current
+        );
+        return { snapshot: response.snapshot };
+      },
       joinRoom: async (roomCode, nickname, password) => {
         const draft = joinTargetRef.current;
         const joinConnectionTarget = targetFromDraft(draft);

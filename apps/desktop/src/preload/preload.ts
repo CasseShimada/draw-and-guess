@@ -12,6 +12,7 @@ import {
   ConnectionTestResultSchema,
   ConfigureGameSchema,
   CreateRoomArgsSchema,
+  CreateRoomResponseSchema,
   DesktopRoomResponseSchema,
   DesktopSettingsSchema,
   DiagnosticsExportResultSchema,
@@ -39,6 +40,7 @@ import {
   UploadWordPoolArgsSchema,
   UploadWordPoolResultSchema,
   WordPackFileDtoSchema,
+  desktopIpcErrorMessage,
   type DesktopBridge
 } from "../shared/ipc.js";
 import {
@@ -60,7 +62,12 @@ async function invoke<Input, Output>(
   input: Input
 ): Promise<Output> {
   const safeInput = inputSchema.parse(input);
-  const output = (await ipcRenderer.invoke(channel, safeInput)) as unknown;
+  let output: unknown;
+  try {
+    output = (await ipcRenderer.invoke(channel, safeInput)) as unknown;
+  } catch (error) {
+    throw new Error(desktopIpcErrorMessage(error));
+  }
   return outputSchema.parse(output);
 }
 
@@ -196,7 +203,7 @@ const bridge: DesktopBridge = {
       invoke(
         IPC_CHANNELS.gameCreateRoom,
         CreateRoomArgsSchema,
-        DesktopRoomResponseSchema,
+        CreateRoomResponseSchema,
         args
       ),
     joinRoom: (args) =>

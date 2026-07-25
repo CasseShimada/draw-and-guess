@@ -89,6 +89,11 @@ export const IPC_CHANNELS = {
   contentAvatarRemove: "content:avatar:remove"
 } as const;
 
+export function desktopIpcErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "桌面操作失败";
+  return message.replace(/^Error invoking remote method '[^']+': Error: /u, "");
+}
+
 export const NormalizedCropSchema = z
   .object({
     x: z.number().min(0).max(1),
@@ -268,6 +273,11 @@ export const DesktopRoomResponseSchema = z
   })
   .strict();
 
+export const CreateRoomResponseSchema = DesktopRoomResponseSchema.extend({
+  target: ConnectionTargetSchema,
+  server: EmbeddedServerStatusSchema
+}).strict();
+
 export const ConfigureGameSchema = z
   .object({
     target: ConnectionTargetSchema
@@ -276,8 +286,6 @@ export const ConfigureGameSchema = z
 
 export const CreateRoomArgsSchema = z
   .object({
-    target: ConnectionTargetSchema,
-    confirmInsecureHttp: z.boolean().default(false),
     nickname: z.string().trim().min(1).max(24),
     password: z.string().min(4).max(128)
   })
@@ -587,7 +595,7 @@ export interface DesktopBridge {
     configure(target: z.input<typeof ConnectionTargetSchema>): Promise<void>;
     createRoom(
       args: z.input<typeof CreateRoomArgsSchema>
-    ): Promise<z.infer<typeof DesktopRoomResponseSchema>>;
+    ): Promise<z.infer<typeof CreateRoomResponseSchema>>;
     joinRoom(
       args: z.input<typeof JoinRoomArgsSchema>
     ): Promise<z.infer<typeof DesktopRoomResponseSchema>>;

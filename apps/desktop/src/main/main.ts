@@ -17,6 +17,7 @@ import {
 import { GameClientService } from "./game-client-service.js";
 import { registerIpcHandlers } from "./ipc-controller.js";
 import { LoginItemService } from "./login-item-service.js";
+import { LocalRoomCoordinator } from "./local-room-coordinator.js";
 import { PermissionService } from "./permission-service.js";
 import { RedactingLogger } from "./redacting-logger.js";
 import { SettingsService, type EncryptionProvider } from "./settings-service.js";
@@ -201,6 +202,32 @@ async function runSmokeCheck(
         true
       )) as { assetLoaded: boolean; marker: string | null })
     : { assetLoaded: false, marker: null };
+  const autoLocalCreate = (await window.webContents.executeJavaScript(
+    `(async () => {
+      await window.drawGuessDesktop.server.stop();
+      const response = await window.drawGuessDesktop.game.createRoom({
+        nickname: "Auto-start Smoke Host",
+        password: "smoke-password"
+      });
+      const refreshed = await window.drawGuessDesktop.bootstrap();
+      return {
+        roomCode: response.snapshot.roomCode,
+        target: response.target,
+        server: response.server,
+        persistedTarget: refreshed.settings.currentClientTarget
+      };
+    })()`,
+    true
+  )) as {
+    roomCode: unknown;
+    target: { host?: unknown; port?: unknown; security?: unknown };
+    server: {
+      state?: unknown;
+      actualPort?: unknown;
+      serverInstanceId?: unknown;
+    };
+    persistedTarget: { host?: unknown; port?: unknown; security?: unknown };
+  };
   writeFileSync(
     resultPath,
     `${JSON.stringify(
@@ -224,7 +251,16 @@ async function runSmokeCheck(
           networkUi.hasBindModes === true &&
           networkUi.noExternalInviteBridge === true &&
           themeRuntime.assetLoaded &&
-          themeRuntime.marker === "packaged-theme-ready",
+          themeRuntime.marker === "packaged-theme-ready" &&
+          typeof autoLocalCreate.roomCode === "string" &&
+          autoLocalCreate.target.host === "127.0.0.1" &&
+          autoLocalCreate.target.port === 32_100 &&
+          autoLocalCreate.target.security === "http" &&
+          autoLocalCreate.server.state === "running" &&
+          autoLocalCreate.server.actualPort === 32_100 &&
+          autoLocalCreate.server.serverInstanceId !== server.serverInstanceId &&
+          JSON.stringify(autoLocalCreate.persistedTarget) ===
+            JSON.stringify(autoLocalCreate.target),
         protocolVersion: PROTOCOL_VERSION,
         renderer,
         server,
@@ -232,6 +268,7 @@ async function runSmokeCheck(
         connectionInfo,
         embedded,
         networkUi,
+        autoLocalCreate,
         theme: {
           status: theme.status,
           runtime: themeRuntime,
@@ -294,6 +331,7 @@ async function boot(): Promise<void> {
   );
   const connectionPreflight = new ConnectionPreflightService(settings, logger);
   const gameClient = new GameClientService(settings, logger, connectionPreflight);
+  const localRooms = new LocalRoomCoordinator(embeddedServer, settings, gameClient);
   const notifications = new FixedNotificationService({
     enabled: () => settings.settings.notificationsEnabled,
     supported: () => Notification.isSupported(),
@@ -337,6 +375,7 @@ async function boot(): Promise<void> {
     settings,
     embeddedServer,
     gameClient,
+    localRooms,
     connectionPreflight,
     notifications,
     loginItems,

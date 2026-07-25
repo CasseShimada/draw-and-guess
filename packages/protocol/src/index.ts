@@ -13,7 +13,7 @@ import {
 } from "@draw-guess/shared-types";
 
 export const PROTOCOL_VERSION = 4;
-export const APPLICATION_VERSION = "0.5.0";
+export const APPLICATION_VERSION = "0.5.1";
 export const MAX_JSON_MESSAGE_BYTES = 16 * 1024;
 export const MAX_ENCODED_IMAGE_BYTES = 2 * 1024 * 1024;
 export const MAX_FRAME_PACKET_BYTES = MAX_ENCODED_IMAGE_BYTES + 8;

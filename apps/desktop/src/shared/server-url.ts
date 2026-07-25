@@ -78,7 +78,7 @@ export function normalizeConnectionHost(hostInput: string): string {
     throw new Error("服务器地址包含空白或控制字符");
   }
   if (hostInput.includes("[") || hostInput.includes("]") || hostInput.includes(":")) {
-    throw new Error("0.5.0 暂不支持 IPv6 服务器地址");
+    throw new Error("当前版本暂不支持 IPv6 服务器地址");
   }
   const lower = hostInput.toLowerCase();
   const ipv4 = ipv4Parts(lower);
@@ -254,7 +254,7 @@ export function parseConnectionAddress(addressInput: string): ParsedConnectionAd
   }
   const colonCount = [...addressInput].filter((character) => character === ":").length;
   if (colonCount > 1) {
-    throw new Error("0.5.0 暂不支持 IPv6 服务器地址");
+    throw new Error("当前版本暂不支持 IPv6 服务器地址");
   }
   if (colonCount === 1) {
     const separator = addressInput.lastIndexOf(":");

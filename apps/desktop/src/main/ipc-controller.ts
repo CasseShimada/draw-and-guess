@@ -21,6 +21,7 @@ import {
   ConnectionTestResultSchema,
   ConfigureGameSchema,
   CreateRoomArgsSchema,
+  CreateRoomResponseSchema,
   DesktopRoomResponseSchema,
   DesktopSettingsSchema,
   DiagnosticsExportResultSchema,
@@ -62,6 +63,7 @@ import type { EmbeddedServerService } from "./embedded-server-service.js";
 import type { GameClientService } from "./game-client-service.js";
 import type { FixedNotificationService } from "./fixed-notification-service.js";
 import type { LoginItemService } from "./login-item-service.js";
+import type { LocalRoomCoordinator } from "./local-room-coordinator.js";
 import type { PermissionService } from "./permission-service.js";
 import type { RedactingLogger } from "./redacting-logger.js";
 import type { SettingsService } from "./settings-service.js";
@@ -79,6 +81,7 @@ interface IpcServices {
   settings: SettingsService;
   embeddedServer: EmbeddedServerService;
   gameClient: GameClientService;
+  localRooms: LocalRoomCoordinator;
   connectionPreflight: ConnectionPreflightService;
   notifications: FixedNotificationService;
   loginItems: LoginItemService;
@@ -362,9 +365,8 @@ export function registerIpcHandlers(services: IpcServices): () => void {
   handle(
     IPC_CHANNELS.gameCreateRoom,
     CreateRoomArgsSchema,
-    DesktopRoomResponseSchema,
-    async ({ target, nickname, password, confirmInsecureHttp }) =>
-      services.gameClient.createRoom(target, nickname, password, confirmInsecureHttp)
+    CreateRoomResponseSchema,
+    async ({ nickname, password }) => services.localRooms.createRoom(nickname, password)
   );
 
   handle(
