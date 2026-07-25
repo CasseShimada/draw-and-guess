@@ -188,7 +188,21 @@ jobs:
             relative="${artifact#release-input/}"
             platform="${relative%%/*}"
             filename="$(basename "$artifact")"
-            cp -- "$artifact" "release-files/${platform}-${filename}"
+            platform_slug="$(
+              printf '%s' "${platform#draw-guess-}" |
+                tr '[:upper:]' '[:lower:]'
+            )"
+            extension="${filename##*.}"
+            suffix=""
+            if [[ "$filename" == "DrawGuessSetup.exe" ]]; then
+              suffix="-setup"
+            fi
+            target="release-files/draw-guess-${GITHUB_REF_NAME#v}-${platform_slug}${suffix}.${extension}"
+            if [[ -e "$target" ]]; then
+              echo "Duplicate release target: $target" >&2
+              exit 1
+            fi
+            cp -- "$artifact" "$target"
           done < <(
             find release-input -type f \
               \( -iname '*.exe' -o -iname '*.zip' -o -iname '*.dmg' \
