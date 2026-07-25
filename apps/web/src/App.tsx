@@ -298,7 +298,7 @@ function Home({
               <p className="muted">房间与参考图只保存在服务器内存中。</p>
             </div>
             <label>
-              你的昵称
+              你的昵称（将自动添加 #四位数字）
               <input
                 name="nickname"
                 maxLength={24}
@@ -318,7 +318,11 @@ function Home({
                 required
               />
             </label>
-            {error && <p className="form-error">{error}</p>}
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
             <button className="primary-button" disabled={busy} type="submit">
               {busy ? "正在创建…" : "创建并进入"}
             </button>
@@ -342,7 +346,7 @@ function Home({
               />
             </label>
             <label>
-              你的昵称
+              你的昵称（将自动添加 #四位数字）
               <input
                 name="nickname"
                 maxLength={24}
@@ -361,7 +365,11 @@ function Home({
               />
             </label>
             {avatarControl}
-            {error && <p className="form-error">{error}</p>}
+            {error && (
+              <p className="form-error" data-ui="join-error" role="alert">
+                {error}
+              </p>
+            )}
             <button className="primary-button" disabled={busy} type="submit">
               {busy ? "正在加入…" : "加入房间"}
             </button>
@@ -506,6 +514,14 @@ export function App({
       setError(null);
       toastTimerRef.current = null;
     }, 5_000);
+  }, []);
+
+  const reportEntryError = useCallback((message: string) => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+    setError(message);
   }, []);
 
   const copyRoomCode = useCallback(
@@ -1312,7 +1328,9 @@ export function App({
           );
       applySnapshot(response.snapshot);
     } catch (requestError) {
-      notify(requestError instanceof Error ? requestError.message : "加入失败");
+      reportEntryError(
+        requestError instanceof Error ? requestError.message : "加入房间失败"
+      );
     } finally {
       setBusy(false);
     }

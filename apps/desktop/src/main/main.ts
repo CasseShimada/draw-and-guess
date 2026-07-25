@@ -246,8 +246,13 @@ async function runSmokeCheck(
         };
         inspect();
       });
+      const selfNickname =
+        response.snapshot.players.find(
+          (player) => player.id === response.snapshot.selfPlayerId
+        )?.nickname ?? null;
       return {
         roomCode: response.snapshot.roomCode,
+        selfNickname,
         target: response.target,
         server: response.server,
         persistedTarget: refreshed.settings.currentClientTarget,
@@ -257,6 +262,7 @@ async function runSmokeCheck(
     true
   )) as {
     roomCode: unknown;
+    selfNickname: unknown;
     target: { host?: unknown; port?: unknown; security?: unknown };
     server: {
       state?: unknown;
@@ -269,6 +275,176 @@ async function runSmokeCheck(
       displayedCode?: unknown;
       hasCopyButton?: unknown;
     };
+  };
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("刷新桌面界面以恢复房主状态超时"));
+    }, 10_000);
+    window.webContents.once("did-finish-load", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    window.webContents.reload();
+  });
+  const hostRoomRuntime = (await window.webContents.executeJavaScript(
+    `(async () => {
+      const roomCode = ${JSON.stringify(autoLocalCreate.roomCode)};
+      const target = ${JSON.stringify(autoLocalCreate.target)};
+      const connectionButton = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const button = document.querySelector(
+            '[data-ui="connection-management"]'
+          );
+          const displayedCode = document
+            .querySelector('[data-ui="host-room-code"] code')
+            ?.textContent?.trim();
+          if (button && displayedCode === roomCode) {
+            resolve(button);
+            return;
+          }
+          if (Date.now() >= deadline) {
+            resolve(null);
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
+      connectionButton?.click();
+      const passwordControlUi = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const control = document.querySelector(
+            '[data-ui="actual-host-room-password"]'
+          );
+          if (
+            control &&
+            control.textContent?.includes(roomCode) &&
+            control.querySelectorAll('input[type="password"]').length === 2
+          ) {
+            resolve({ visible: true, hasTwoPasswordInputs: true });
+            return;
+          }
+          if (Date.now() >= deadline) {
+            resolve({
+              visible: false,
+              hasTwoPasswordInputs:
+                control?.querySelectorAll('input[type="password"]').length === 2
+            });
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
+      await window.drawGuessDesktop.server.changeRoomPassword(
+        roomCode,
+        "rotated-smoke-password"
+      );
+      let rejectedJoinMessage = null;
+      try {
+        await window.drawGuessDesktop.game.joinRoom({
+          target,
+          confirmInsecureHttp: false,
+          roomCode,
+          nickname: "Rejected Smoke Player",
+          password: "smoke-password"
+        });
+      } catch (error) {
+        rejectedJoinMessage =
+          error instanceof Error ? error.message : String(error);
+      }
+      const diagnostics = await window.drawGuessDesktop.diagnostics.read();
+      const joinFailureDiagnostic =
+        [...diagnostics]
+          .reverse()
+          .find((entry) => entry.message.startsWith("加入房间失败"))?.message ??
+        null;
+      [...document.querySelectorAll(".desktop-dock button")]
+        .find((button) => button.textContent?.trim() === "诊断")
+        ?.click();
+      const joinFailureDiagnosticUi = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const highlight = document.querySelector(
+            '[data-ui="join-failure-diagnostic"]'
+          );
+          if (
+            highlight?.textContent?.includes("房间密码错误") &&
+            highlight.textContent.includes("最近一次加入失败")
+          ) {
+            resolve({ visible: true, explainsPasswordFailure: true });
+            return;
+          }
+          if (Date.now() >= deadline) {
+            resolve({
+              visible: Boolean(highlight),
+              explainsPasswordFailure:
+                highlight?.textContent?.includes("房间密码错误") === true
+            });
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
+      return {
+        passwordControlUi,
+        rejectedJoinMessage,
+        joinFailureDiagnostic,
+        joinFailureDiagnosticUi
+      };
+    })()`,
+    true
+  )) as {
+    passwordControlUi: {
+      visible?: unknown;
+      hasTwoPasswordInputs?: unknown;
+    };
+    rejectedJoinMessage: unknown;
+    joinFailureDiagnostic: unknown;
+    joinFailureDiagnosticUi: {
+      visible?: unknown;
+      explainsPasswordFailure?: unknown;
+    };
+  };
+  const rotatedJoinResponse =
+    typeof autoLocalCreate.roomCode === "string" &&
+    autoLocalCreate.target.host === "127.0.0.1" &&
+    typeof autoLocalCreate.target.port === "number"
+      ? await fetch(
+          `http://127.0.0.1:${String(
+            autoLocalCreate.target.port
+          )}/api/desktop/rooms/${encodeURIComponent(autoLocalCreate.roomCode)}/join`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Draw-Guess-Client": "desktop",
+              "X-Draw-Guess-Protocol": String(PROTOCOL_VERSION)
+            },
+            body: JSON.stringify({
+              roomCode: autoLocalCreate.roomCode,
+              nickname: "Auto-start Smoke Host",
+              password: "rotated-smoke-password"
+            })
+          }
+        )
+      : null;
+  const rotatedJoinBody = rotatedJoinResponse
+    ? ((await rotatedJoinResponse.json()) as {
+        snapshot?: { players?: Array<{ nickname?: unknown }> };
+      })
+    : null;
+  const rotatedNicknames =
+    rotatedJoinBody?.snapshot?.players
+      ?.map((player) => player.nickname)
+      .filter((nickname): nickname is string => typeof nickname === "string") ?? [];
+  const rotatedPassword = {
+    joinStatus: rotatedJoinResponse?.status ?? null,
+    taggedNicknames: rotatedNicknames,
+    uniqueNicknames: new Set(rotatedNicknames).size === rotatedNicknames.length
   };
   writeFileSync(
     resultPath,
@@ -306,6 +482,23 @@ async function runSmokeCheck(
           autoLocalCreate.roomCodeUi.visible === true &&
           autoLocalCreate.roomCodeUi.displayedCode === autoLocalCreate.roomCode &&
           autoLocalCreate.roomCodeUi.hasCopyButton === true &&
+          typeof autoLocalCreate.selfNickname === "string" &&
+          /#\d{4}$/u.test(autoLocalCreate.selfNickname) &&
+          hostRoomRuntime.passwordControlUi.visible === true &&
+          hostRoomRuntime.passwordControlUi.hasTwoPasswordInputs === true &&
+          typeof hostRoomRuntime.rejectedJoinMessage === "string" &&
+          hostRoomRuntime.rejectedJoinMessage.includes("房间密码错误") &&
+          hostRoomRuntime.rejectedJoinMessage.includes("房主可能刚刚修改过密码") &&
+          typeof hostRoomRuntime.joinFailureDiagnostic === "string" &&
+          hostRoomRuntime.joinFailureDiagnostic.includes('"code":"UNAUTHORIZED"') &&
+          hostRoomRuntime.joinFailureDiagnosticUi.visible === true &&
+          hostRoomRuntime.joinFailureDiagnosticUi.explainsPasswordFailure === true &&
+          rotatedPassword.joinStatus === 200 &&
+          rotatedPassword.taggedNicknames.length === 2 &&
+          rotatedPassword.taggedNicknames.every((nickname) =>
+            /#\d{4}$/u.test(nickname)
+          ) &&
+          rotatedPassword.uniqueNicknames &&
           JSON.stringify(autoLocalCreate.persistedTarget) ===
             JSON.stringify(autoLocalCreate.target),
         protocolVersion: PROTOCOL_VERSION,
@@ -316,6 +509,8 @@ async function runSmokeCheck(
         embedded,
         networkUi,
         autoLocalCreate,
+        hostRoomRuntime,
+        rotatedPassword,
         theme: {
           status: theme.status,
           runtime: themeRuntime,

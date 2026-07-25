@@ -78,7 +78,8 @@ function classifyFetchFailure(error: unknown): {
   if (codes.has("ECONNREFUSED")) {
     return {
       code: "connection-refused",
-      message: "目标机器可达，但该端口没有服务监听"
+      message:
+        "目标地址的该端口拒绝连接；通常是房间服务未启动、端口填错，或服务只监听本机"
     };
   }
   if (

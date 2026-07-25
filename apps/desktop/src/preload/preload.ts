@@ -27,6 +27,7 @@ import {
   JoinRoomArgsSchema,
   SaveWordPackFileArgsSchema,
   HostRoomArgsSchema,
+  HostRoomPasswordArgsSchema,
   ReplaySavedFileSchema,
   SettingsPatchSchema,
   SharingStateSchema,
@@ -143,6 +144,14 @@ const bridge: DesktopBridge = {
       await invoke(IPC_CHANNELS.serverResume, HostRoomArgsSchema, z.void(), {
         roomCode
       });
+    },
+    changeRoomPassword: async (roomCode, password) => {
+      await invoke(
+        IPC_CHANNELS.serverChangeRoomPassword,
+        HostRoomPasswordArgsSchema,
+        z.void(),
+        { roomCode, password }
+      );
     },
     refreshNetworks: () =>
       invoke(

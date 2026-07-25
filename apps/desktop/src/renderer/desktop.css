@@ -156,6 +156,10 @@ body:has(.sharing-overlay) {
   gap: 1rem;
 }
 
+.room-password-card {
+  grid-column: 1 / -1;
+}
+
 .control-card {
   display: grid;
   padding: 1.2rem;
@@ -702,6 +706,36 @@ body:has(.sharing-overlay) {
   margin: 0;
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.diagnostics-highlight {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem 1rem;
+  border: 2px solid #b74636;
+  background: #fff1e9;
+  box-shadow: 4px 4px 0 rgb(183 70 54 / 18%);
+}
+
+.diagnostics-highlight > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.diagnostics-highlight time {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.diagnostics-highlight p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font:
+    0.78rem/1.55 ui-monospace,
+    "Cascadia Code",
+    monospace;
 }
 
 .log-list {

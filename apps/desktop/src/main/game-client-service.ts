@@ -33,6 +33,13 @@ import {
   type NormalizedConnectionTarget
 } from "../shared/server-url.js";
 import type { ConnectionPreflightService } from "./connection-preflight-service.js";
+import { DesktopRequestError } from "./desktop-request-error.js";
+import {
+  ConnectionPreflightError,
+  describeJoinRoomFailure,
+  joinRoomFailureMessage,
+  type JoinRoomFailurePhase
+} from "./join-room-failure.js";
 import type { RedactingLogger } from "./redacting-logger.js";
 import type { SettingsService } from "./settings-service.js";
 
@@ -142,22 +149,45 @@ export class GameClientService {
     password: string,
     confirmInsecureHttp = false
   ): Promise<z.infer<typeof DesktopRoomResponseSchema>> {
-    const preflight = await this.#requireSuccessfulPreflight(
-      targetInput,
-      confirmInsecureHttp
-    );
-    await this.configure(preflight.target);
-    const response = await this.#request(
-      `/api/desktop/rooms/${encodeURIComponent(roomCode)}/join`,
-      {
-        method: "POST",
-        body: JSON.stringify({ roomCode, nickname, password })
+    let phase: JoinRoomFailurePhase = "preflight";
+    try {
+      const preflight = await this.#requireSuccessfulPreflight(
+        targetInput,
+        confirmInsecureHttp
+      );
+      phase = "target-configuration";
+      await this.configure(preflight.target);
+      phase = "join-request";
+      const response = await this.#request(
+        `/api/desktop/rooms/${encodeURIComponent(roomCode)}/join`,
+        {
+          method: "POST",
+          body: JSON.stringify({ roomCode, nickname, password })
+        }
+      );
+      phase = "response-validation";
+      const session = DesktopSessionResponseSchema.parse(response);
+      phase = "session-setup";
+      await this.#acceptSession(session.sessionToken, session.expiresAt);
+      await this.#settings.addRecentConnection(this.#target);
+      return DesktopRoomResponseSchema.parse({ snapshot: session.snapshot });
+    } catch (error) {
+      const failure = describeJoinRoomFailure(error, phase);
+      let origin: string | null = null;
+      try {
+        origin = normalizeConnectionTarget(targetInput).origin;
+      } catch {
+        // The invalid-input diagnostic already explains why normalization failed.
       }
-    );
-    const session = DesktopSessionResponseSchema.parse(response);
-    await this.#acceptSession(session.sessionToken, session.expiresAt);
-    await this.#settings.addRecentConnection(this.#target);
-    return DesktopRoomResponseSchema.parse({ snapshot: session.snapshot });
+      this.#logger.warn("加入房间失败", {
+        origin,
+        phase: failure.phaseLabel,
+        code: failure.code,
+        reason: failure.reason,
+        suggestion: failure.suggestion
+      });
+      throw new Error(joinRoomFailureMessage(failure), { cause: error });
+    }
   }
 
   async resume(
@@ -557,7 +587,8 @@ export class GameClientService {
         response.status,
         parsed.success
           ? (parsed.data.error?.message ?? "服务器请求失败")
-          : "服务器请求失败"
+          : "服务器请求失败",
+        parsed.success ? parsed.data.error?.code : undefined
       );
     }
     return response;
@@ -576,7 +607,7 @@ export class GameClientService {
   ) {
     const result = await this.#preflight.test(target, confirmInsecureHttp);
     if (!result.ok) {
-      throw new Error(result.message);
+      throw new ConnectionPreflightError(result);
     }
     return result;
   }
@@ -597,14 +628,5 @@ export class GameClientService {
       clearInterval(this.#heartbeat);
       this.#heartbeat = null;
     }
-  }
-}
-
-export class DesktopRequestError extends Error {
-  constructor(
-    readonly status: number,
-    message: string
-  ) {
-    super(message);
   }
 }

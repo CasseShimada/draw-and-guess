@@ -38,6 +38,7 @@ export const IPC_CHANNELS = {
   serverStatus: "server:status",
   serverPause: "server:pause",
   serverResume: "server:resume",
+  serverChangeRoomPassword: "server:change-room-password",
   serverRefreshNetworks: "server:refresh-networks",
   connectionTest: "connection:test",
   systemOpenFirewallSettings: "system:open-firewall-settings",
@@ -301,6 +302,17 @@ export const JoinRoomArgsSchema = z
       .toUpperCase()
       .regex(/^[A-Z0-9]{6}$/),
     nickname: z.string().trim().min(1).max(24),
+    password: z.string().min(4).max(128)
+  })
+  .strict();
+
+export const HostRoomPasswordArgsSchema = z
+  .object({
+    roomCode: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z0-9]{6}$/),
     password: z.string().min(4).max(128)
   })
   .strict();
@@ -578,6 +590,7 @@ export interface DesktopBridge {
     stop(): Promise<EmbeddedServerStatus>;
     pause(roomCode: string): Promise<void>;
     resume(roomCode: string): Promise<void>;
+    changeRoomPassword(roomCode: string, password: string): Promise<void>;
     refreshNetworks(): Promise<EmbeddedServerStatus>;
     onStatus(listener: (status: EmbeddedServerStatus) => void): () => void;
   };

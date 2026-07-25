@@ -162,7 +162,7 @@ export class GameService {
     password: string,
     sessionKind: PlayerSession["kind"] = "browser"
   ): Promise<RoomJoinResult> {
-    const nickname = this.#validateNickname(nicknameInput);
+    const nickname = this.#tagNickname(this.#validateNickname(nicknameInput), []);
     let roomCode = randomRoomCode();
     while (this.rooms.has(roomCode)) {
       roomCode = randomRoomCode();
@@ -217,15 +217,10 @@ export class GameService {
     if (!(await verifyPassword(password, room.password))) {
       throw new GameError(ErrorCode.UNAUTHORIZED, "房间密码错误", 401);
     }
-    const nickname = this.#validateNickname(nicknameInput);
-    const nicknameKey = nickname.toLocaleLowerCase("zh-CN");
-    if (
-      [...room.players.values()].some(
-        (player) => player.nickname.toLocaleLowerCase("zh-CN") === nicknameKey
-      )
-    ) {
-      throw new GameError(ErrorCode.INVALID_STATE, "这个昵称已被使用", 409);
-    }
+    const nickname = this.#tagNickname(
+      this.#validateNickname(nicknameInput),
+      room.players.values()
+    );
     const now = this.#now();
     const player = this.#createPlayer(nickname, now);
     room.players.set(player.id, player);
@@ -740,6 +735,27 @@ export class GameService {
       this.#deliverLatestFrame(target, viewerPacket);
     }
     return { accepted: true, sequence: accepted.frame.sequence };
+  }
+
+  async changePasswordFromEmbeddedHost(
+    hostControlKey: string,
+    roomCode: string,
+    password: string
+  ): Promise<void> {
+    this.#requireHostControl(hostControlKey);
+    const room = this.#requireRoom(roomCode);
+    if (password.length < 4 || password.length > 128) {
+      throw new GameError(ErrorCode.BAD_MESSAGE, "房间密码必须为 4 到 128 个字符");
+    }
+    room.password = await hashPassword(password);
+    room.lastActivityAt = this.#now();
+    this.#appendChat(room, {
+      kind: "system",
+      playerId: null,
+      nickname: null,
+      text: "实际主机已更新房间密码"
+    });
+    this.broadcastSnapshots(room);
   }
 
   pauseFromEmbeddedHost(hostControlKey: string, roomCode: string): void {
@@ -1459,6 +1475,25 @@ export class GameService {
       throw new GameError(ErrorCode.BAD_MESSAGE, "昵称格式不正确");
     }
     return nickname;
+  }
+
+  #tagNickname(nickname: string, players: Iterable<Player>): string {
+    const usedTags = new Set(
+      [...players]
+        .map((player) => /#(\d{4})$/u.exec(player.nickname)?.[1])
+        .filter((tag): tag is string => Boolean(tag))
+    );
+    if (usedTags.size >= 10_000) {
+      throw new GameError(ErrorCode.INVALID_STATE, "房间昵称编号已用完", 409);
+    }
+    const start = randomInt(10_000);
+    for (let offset = 0; offset < 10_000; offset += 1) {
+      const tag = String((start + offset) % 10_000).padStart(4, "0");
+      if (!usedTags.has(tag)) {
+        return `${nickname}#${tag}`;
+      }
+    }
+    throw new GameError(ErrorCode.INVALID_STATE, "房间昵称编号已用完", 409);
   }
 
   #requireRoom(roomCode: string): Room {

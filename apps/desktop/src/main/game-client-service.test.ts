@@ -18,6 +18,21 @@ const encryption: EncryptionProvider = {
   decrypt: (value) => Buffer.from(value).toString("utf8")
 };
 
+function connectionInfoResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      service: "draw-guess",
+      appVersion: "0.5.4",
+      protocolVersion: PROTOCOL_VERSION,
+      serverInstanceId: "i".repeat(43),
+      now: Date.now(),
+      websocketPath: "/ws",
+      capabilities: { browser: true, desktop: true }
+    }),
+    { headers: { "content-type": "application/json" } }
+  );
+}
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   await Promise.all(
@@ -35,19 +50,7 @@ describe("game client target epochs", () => {
     await settings.initialize();
     const logger = new RedactingLogger(directory);
     const preflight = new ConnectionPreflightService(settings, logger, {
-      fetch: async () =>
-        new Response(
-          JSON.stringify({
-            service: "draw-guess",
-            appVersion: "0.5.0",
-            protocolVersion: PROTOCOL_VERSION,
-            serverInstanceId: "i".repeat(43),
-            now: Date.now(),
-            websocketPath: "/ws",
-            capabilities: { browser: true, desktop: true }
-          }),
-          { headers: { "content-type": "application/json" } }
-        )
+      fetch: async () => connectionInfoResponse()
     });
 
     let requestStarted!: () => void;
@@ -104,5 +107,86 @@ describe("game client target epochs", () => {
     });
     expect(await settings.session("http://127.0.0.1:3000")).toBeNull();
     expect(settings.settings.recentConnections).toEqual([]);
+  });
+});
+
+describe("join-room failure diagnostics", () => {
+  it("shows and logs a refused-port cause with an actionable suggestion", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "draw-guess-client-"));
+    directories.push(directory);
+    const settings = new SettingsService(directory, encryption);
+    await settings.initialize();
+    const logger = new RedactingLogger(directory);
+    const refused = Object.assign(new Error("connect ECONNREFUSED"), {
+      code: "ECONNREFUSED"
+    });
+    const preflight = new ConnectionPreflightService(settings, logger, {
+      fetch: async () => {
+        throw new TypeError("fetch failed", { cause: refused });
+      }
+    });
+    const client = new GameClientService(settings, logger, preflight);
+
+    await expect(
+      client.joinRoom(
+        { host: "192.168.1.8", port: 3000, security: "http" },
+        "ABC234",
+        "不应写日志的昵称",
+        "not-in-the-log"
+      )
+    ).rejects.toThrow(
+      /加入房间失败（连接预检）：目标地址的该端口拒绝连接.*主机必须监听 0\.0\.0\.0/u
+    );
+
+    const diagnostic = logger.entries().at(-1)?.message ?? "";
+    expect(diagnostic).toContain("加入房间失败");
+    expect(diagnostic).toContain('"code":"connection-refused"');
+    expect(diagnostic).toContain('"phase":"连接预检"');
+    expect(diagnostic).not.toContain("不应写日志的昵称");
+    expect(diagnostic).not.toContain("not-in-the-log");
+  });
+
+  it("distinguishes a rejected password after a successful server preflight", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "draw-guess-client-"));
+    directories.push(directory);
+    const settings = new SettingsService(directory, encryption);
+    await settings.initialize();
+    const logger = new RedactingLogger(directory);
+    const preflight = new ConnectionPreflightService(settings, logger, {
+      fetch: async () => connectionInfoResponse()
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: { code: "UNAUTHORIZED", message: "房间密码错误" }
+            }),
+            {
+              status: 401,
+              headers: { "content-type": "application/json" }
+            }
+          )
+        )
+      )
+    );
+    const client = new GameClientService(settings, logger, preflight);
+
+    await expect(
+      client.joinRoom(
+        { host: "127.0.0.1", port: 3000, security: "http" },
+        "ABC234",
+        "玩家",
+        "wrong-secret"
+      )
+    ).rejects.toThrow(
+      /加入房间失败（验证房间）：房间密码错误.*房主可能刚刚修改过密码/u
+    );
+
+    const diagnostic = logger.entries().at(-1)?.message ?? "";
+    expect(diagnostic).toContain('"code":"UNAUTHORIZED"');
+    expect(diagnostic).toContain('"reason":"房间密码错误"');
+    expect(diagnostic).not.toContain("wrong-secret");
   });
 });

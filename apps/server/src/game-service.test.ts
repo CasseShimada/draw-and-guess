@@ -96,6 +96,55 @@ describe("game service protocol-v4 classic flow", () => {
     vi.useRealTimers();
   });
 
+  it("assigns stable unique numeric nickname tags and lets the embedded host rotate the room password", async () => {
+    const hostJoin = await service.createRoom("同名玩家", "old-secret", "desktop");
+    const roomCode = hostJoin.snapshot.roomCode;
+    const guestJoin = await service.joinRoom(
+      roomCode,
+      "同名玩家",
+      "old-secret",
+      "desktop"
+    );
+    const initialNames = hostJoin.snapshot.players.map((player) => player.nickname);
+    const joinedNames = guestJoin.snapshot.players.map((player) => player.nickname);
+
+    expect(initialNames[0]).toMatch(/^同名玩家#\d{4}$/u);
+    expect(joinedNames).toHaveLength(2);
+    expect(new Set(joinedNames).size).toBe(2);
+    expect(
+      guestJoin.snapshot.players.find(
+        (player) => player.id === hostJoin.snapshot.selfPlayerId
+      )?.nickname
+    ).toBe(initialNames[0]);
+
+    await expect(
+      service.changePasswordFromEmbeddedHost("not-the-host-key", roomCode, "new-secret")
+    ).rejects.toThrow("此操作只允许实际内嵌服务器主机执行");
+
+    await service.changePasswordFromEmbeddedHost(
+      "local-host-key",
+      roomCode,
+      "new-secret"
+    );
+    await expect(
+      service.joinRoom(roomCode, "旧密码玩家", "old-secret", "desktop")
+    ).rejects.toThrow("房间密码错误");
+    const newGuest = await service.joinRoom(
+      roomCode,
+      "新密码玩家",
+      "new-secret",
+      "desktop"
+    );
+    expect(
+      newGuest.snapshot.players.find(
+        (player) => player.id === newGuest.snapshot.selfPlayerId
+      )?.nickname
+    ).toMatch(/^新密码玩家#\d{4}$/u);
+    expect(service.resumeSession(hostJoin.sessionToken, "desktop").player.id).toBe(
+      hostJoin.snapshot.selfPlayerId
+    );
+  });
+
   it("keeps words private, relays accepted frames, finalizes for ten seconds, and scores", async () => {
     const hostJoin = await service.createRoom("画手", "secret", "desktop");
     const roomCode = hostJoin.snapshot.roomCode;

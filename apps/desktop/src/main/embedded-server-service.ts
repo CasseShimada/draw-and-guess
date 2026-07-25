@@ -184,6 +184,16 @@ export class EmbeddedServerService {
     running.service.resumeFromEmbeddedHost(this.#hostControlKey, roomCode);
   }
 
+  async changeRoomPassword(roomCode: string, password: string): Promise<void> {
+    const running = this.#requireRunning();
+    await running.service.changePasswordFromEmbeddedHost(
+      this.#hostControlKey,
+      roomCode,
+      password
+    );
+    this.#logger.info("房间密码已由实际主机更新", { roomCode });
+  }
+
   async revalidateReplay(): Promise<ReplayHostCapability> {
     return this.#requireRunning().service.revalidateReplayFromEmbeddedHost(
       this.#hostControlKey,

@@ -32,6 +32,7 @@ import {
   GetAvatarArgsSchema,
   GetRelayTaskArgsSchema,
   HostRoomArgsSchema,
+  HostRoomPasswordArgsSchema,
   IPC_CHANNELS,
   JoinRoomArgsSchema,
   SaveWordPackFileArgsSchema,
@@ -291,6 +292,14 @@ export function registerIpcHandlers(services: IpcServices): () => void {
 
   handle(IPC_CHANNELS.serverResume, HostRoomArgsSchema, z.void(), ({ roomCode }) =>
     services.embeddedServer.resume(roomCode)
+  );
+
+  handle(
+    IPC_CHANNELS.serverChangeRoomPassword,
+    HostRoomPasswordArgsSchema,
+    z.void(),
+    async ({ roomCode, password }) =>
+      services.embeddedServer.changeRoomPassword(roomCode, password)
   );
 
   handle(

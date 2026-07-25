@@ -145,6 +145,8 @@ function ConnectionPanel({
   onStart,
   onStop,
   onRefreshNetworks,
+  roomCode,
+  onChangeRoomPassword,
   platform
 }: {
   open: boolean;
@@ -159,6 +161,8 @@ function ConnectionPanel({
   ) => Promise<void>;
   onStop: () => Promise<void>;
   onRefreshNetworks: () => Promise<void>;
+  roomCode: string | null;
+  onChangeRoomPassword: (roomCode: string, password: string) => Promise<void>;
   platform: Bootstrap["platform"];
 }) {
   const [port, setPort] = useState(settings.hostPort);
@@ -175,6 +179,8 @@ function ConnectionPanel({
   const [publicLabel, setPublicLabel] = useState(settings.publicEndpoint?.label ?? "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [newRoomPassword, setNewRoomPassword] = useState("");
+  const [confirmRoomPassword, setConfirmRoomPassword] = useState("");
 
   useEffect(() => {
     setPort(settings.hostPort);
@@ -184,6 +190,11 @@ function ConnectionPanel({
     setPublicSecurity(settings.publicEndpoint?.target.security ?? "https");
     setPublicLabel(settings.publicEndpoint?.label ?? "");
   }, [settings.hostBindMode, settings.hostPort, settings.publicEndpoint]);
+
+  useEffect(() => {
+    setNewRoomPassword("");
+    setConfirmRoomPassword("");
+  }, [roomCode]);
 
   const run = async (operation: () => Promise<void>) => {
     setBusy(true);
@@ -227,6 +238,22 @@ function ConnectionPanel({
       setPublicPort(normalized.port);
       setPublicSecurity(normalized.security);
       setMessage("公网分享信息已保存；本地监听服务无需重启。");
+    });
+  };
+
+  const changeRoomPassword = (event: FormEvent) => {
+    event.preventDefault();
+    void run(async () => {
+      if (!roomCode) {
+        throw new Error("当前没有由本机托管的房间");
+      }
+      if (newRoomPassword !== confirmRoomPassword) {
+        throw new Error("两次输入的新密码不一致");
+      }
+      await onChangeRoomPassword(roomCode, newRoomPassword);
+      setNewRoomPassword("");
+      setConfirmRoomPassword("");
+      setMessage("房间密码已更新；已在房间内的玩家不会被断开。");
     });
   };
 
@@ -482,6 +509,51 @@ function ConnectionPanel({
           </div>
           <small>不保存 SakuraFrp token、隧道 ID、路由器凭据、房间密码或会话。</small>
         </form>
+        {roomCode && (
+          <form
+            className="control-card room-password-card"
+            data-ui="actual-host-room-password"
+            onSubmit={changeRoomPassword}
+          >
+            <span className="service-state service-state--running">
+              房间 {roomCode}
+            </span>
+            <h3>修改当前房间密码</h3>
+            <p>
+              这里只能设置新密码，不会显示旧密码。修改后，新加入的玩家必须使用新密码；
+              已连接玩家保持在线。
+            </p>
+            <label>
+              新密码
+              <input
+                autoComplete="new-password"
+                maxLength={128}
+                minLength={4}
+                onChange={(event) => setNewRoomPassword(event.target.value)}
+                placeholder="4–128 个字符"
+                required
+                type="password"
+                value={newRoomPassword}
+              />
+            </label>
+            <label>
+              再输入一次
+              <input
+                autoComplete="new-password"
+                maxLength={128}
+                minLength={4}
+                onChange={(event) => setConfirmRoomPassword(event.target.value)}
+                required
+                type="password"
+                value={confirmRoomPassword}
+              />
+            </label>
+            <button className="primary-button" disabled={busy} type="submit">
+              {busy ? "正在更新…" : "更新房间密码"}
+            </button>
+            <small>密码仅在主机内存中以摘要保存，不会写入桌面设置或诊断日志。</small>
+          </form>
+        )}
         {message && <p className="panel-message">{message}</p>}
       </div>
     </section>
@@ -1007,6 +1079,9 @@ function SettingsPanel({
 function DiagnosticsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [entries, setEntries] = useState<DiagnosticEntry[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const latestJoinFailure = [...entries]
+    .reverse()
+    .find((entry) => entry.message.startsWith("加入房间失败"));
   const refresh = async () => {
     setEntries(await window.drawGuessDesktop.diagnostics.read());
   };
@@ -1060,6 +1135,15 @@ function DiagnosticsPanel({ open, onClose }: { open: boolean; onClose: () => voi
         <p>
           日志不记录房间密码、完整会话 token、题目或截图内容；导出前仍建议自行检查。
         </p>
+        {latestJoinFailure && (
+          <article className="diagnostics-highlight" data-ui="join-failure-diagnostic">
+            <div>
+              <strong>最近一次加入失败</strong>
+              <time>{latestJoinFailure.timestamp}</time>
+            </div>
+            <p>{latestJoinFailure.message}</p>
+          </article>
+        )}
         <div className="log-list">
           {entries.length === 0 ? (
             <p>暂无日志。</p>
@@ -1418,7 +1502,11 @@ export function DesktopApp() {
           onRefreshNetworks={async () => {
             setServerStatus(await window.drawGuessDesktop.server.refreshNetworks());
           }}
+          onChangeRoomPassword={(roomCode, password) =>
+            window.drawGuessDesktop.server.changeRoomPassword(roomCode, password)
+          }
           open={visiblePanel === "connection"}
+          roomCode={hostControls && snapshot ? snapshot.roomCode : null}
           settings={settings}
           status={serverStatus}
           platform={bootstrap.platform}
