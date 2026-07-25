@@ -22,15 +22,23 @@ const executable =
       : path.join(packageRoot, "draw-guess");
 const smokeRoot = await mkdtemp(path.join(os.tmpdir(), "draw-guess-smoke-"));
 const resultPath = path.join(smokeRoot, "result.json");
-const child = spawn(executable, [], {
+const launchArgs =
+  process.platform === "linux" && process.env.CI ? ["--no-sandbox"] : [];
+let childOutput = "";
+const appendChildOutput = (chunk) => {
+  childOutput = `${childOutput}${chunk.toString("utf8")}`.slice(-16_384);
+};
+const child = spawn(executable, launchArgs, {
   env: {
     ...process.env,
     DRAW_GUESS_USER_DATA: path.join(smokeRoot, "user-data"),
     DRAW_GUESS_SMOKE_RESULT: resultPath
   },
-  stdio: "ignore",
+  stdio: ["ignore", "pipe", "pipe"],
   windowsHide: true
 });
+child.stdout.on("data", appendChildOutput);
+child.stderr.on("data", appendChildOutput);
 
 const exitCode = await new Promise((resolve, reject) => {
   const timeout = setTimeout(() => {
@@ -46,7 +54,16 @@ const exitCode = await new Promise((resolve, reject) => {
     resolve(code);
   });
 });
-const result = JSON.parse(await readFile(resultPath, "utf8"));
+let result;
+try {
+  result = JSON.parse(await readFile(resultPath, "utf8"));
+} catch (error) {
+  const diagnostic = childOutput.trim() || "应用未输出诊断";
+  throw new Error(
+    `打包应用在写入冒烟结果前退出（exit=${String(exitCode)}）：${diagnostic}`,
+    { cause: error }
+  );
+}
 if (
   exitCode !== 0 ||
   result.ok !== true ||
