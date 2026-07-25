@@ -95,12 +95,12 @@ export interface AppProps {
   transport?: DesktopGameTransport;
   hostControls?: ActualHostControls;
   notificationsEnabled?: boolean;
-  initialRoomCode?: string;
+  initialEntryMode?: "create" | "join";
+  joinConnectionControl?: ReactNode;
   lobbyAddon?: ReactNode;
   topbarAddon?: ReactNode;
   onSnapshot?: (snapshot: PublicRoomSnapshot | null) => void;
   onServerMessage?: (message: ServerJsonMessage) => void;
-  invitationText?: (roomCode: string) => string;
   contentServices?: LocalContentServices;
 }
 
@@ -194,7 +194,8 @@ function StatusDot({ state }: { state: ConnectionState }) {
 function Home({
   busy,
   error,
-  initialRoomCode,
+  initialEntryMode,
+  joinConnectionControl,
   avatarControl,
   onCreate,
   onJoin,
@@ -202,19 +203,15 @@ function Home({
 }: {
   busy: boolean;
   error: string | null;
-  initialRoomCode?: string;
+  initialEntryMode: "create" | "join";
+  joinConnectionControl?: ReactNode;
   avatarControl: ReactNode;
   onCreate: (nickname: string, password: string) => Promise<void>;
   onJoin: (roomCode: string, nickname: string, password: string) => Promise<void>;
   onManageWords: () => void;
 }) {
-  const requestedRoom =
-    initialRoomCode ??
-    new URLSearchParams(window.location.search).get("room")?.toUpperCase() ??
-    "";
-  const [entryMode, setEntryMode] = useState<"create" | "join">(
-    requestedRoom ? "join" : "create"
-  );
+  const [entryMode, setEntryMode] = useState<"create" | "join">(initialEntryMode);
+  useEffect(() => setEntryMode(initialEntryMode), [initialEntryMode]);
 
   const submitCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -329,12 +326,12 @@ function Home({
           <form className="entry-form" onSubmit={submitJoin}>
             <div>
               <p className="eyebrow">朋友已经开场？</p>
-              <h2>输入邀请信息</h2>
+              <h2>输入房间连接信息</h2>
             </div>
+            {joinConnectionControl}
             <label>
               六位房间码
               <input
-                defaultValue={requestedRoom}
                 name="roomCode"
                 maxLength={6}
                 minLength={6}
@@ -352,11 +349,17 @@ function Home({
                 required
               />
             </label>
-            {avatarControl}
             <label>
               房间密码
-              <input name="password" type="password" required />
+              <input
+                name="password"
+                minLength={4}
+                maxLength={128}
+                type="password"
+                required
+              />
             </label>
+            {avatarControl}
             {error && <p className="form-error">{error}</p>}
             <button className="primary-button" disabled={busy} type="submit">
               {busy ? "正在加入…" : "加入房间"}
@@ -449,12 +452,12 @@ export function App({
   transport,
   hostControls,
   notificationsEnabled = true,
-  initialRoomCode,
+  initialEntryMode = "create",
+  joinConnectionControl,
   lobbyAddon,
   topbarAddon,
   onSnapshot,
   onServerMessage,
-  invitationText,
   contentServices
 }: AppProps = {}) {
   const contentRef = useRef<LocalContentServices | null>(null);
@@ -1291,9 +1294,6 @@ export function App({
               body: JSON.stringify({ roomCode: code, nickname, password })
             }
           );
-      if (!transport) {
-        window.history.replaceState({}, "", `/?room=${code}`);
-      }
       applySnapshot(response.snapshot);
     } catch (requestError) {
       notify(requestError instanceof Error ? requestError.message : "加入失败");
@@ -1408,7 +1408,8 @@ export function App({
         }
         busy={busy}
         error={error}
-        initialRoomCode={initialRoomCode}
+        initialEntryMode={initialEntryMode}
+        joinConnectionControl={joinConnectionControl}
         onCreate={createRoom}
         onJoin={joinRoom}
         onManageWords={() => setWordManagerOpen(true)}
@@ -1600,16 +1601,6 @@ export function App({
               </div>
               <span className="step-pill">可选</span>
             </div>
-            {invitationText && (
-              <label>
-                邀请信息
-                <textarea
-                  onFocus={(event) => event.currentTarget.select()}
-                  readOnly
-                  value={invitationText(snapshot.roomCode)}
-                />
-              </label>
-            )}
             <AvatarEditor
               avatar={localAvatar}
               label="当前房间头像"

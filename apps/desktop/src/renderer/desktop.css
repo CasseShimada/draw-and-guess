@@ -380,6 +380,258 @@ body:has(.sharing-overlay) {
   text-overflow: ellipsis;
 }
 
+.network-authority-status {
+  display: grid;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: #eee8dc;
+}
+
+.network-authority-status > div {
+  display: grid;
+  padding: 0.55rem 0.65rem;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.network-authority-status > div + div {
+  border-top: 1px solid var(--line);
+}
+
+.network-authority-status dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.network-authority-status dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+  font-size: 0.72rem;
+}
+
+.lan-interface-list,
+.firewall-help {
+  display: grid;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  background: white;
+  gap: 0.55rem;
+}
+
+.lan-interface-list > div {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem 0.7rem;
+}
+
+.lan-interface-list > div:first-child {
+  display: flex;
+  justify-content: space-between;
+}
+
+.lan-interface-list > div:first-child button,
+.firewall-help button {
+  width: auto;
+}
+
+.lan-interface-list span {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.lan-interface-list code,
+.firewall-help code {
+  overflow-wrap: anywhere;
+  font-size: 0.68rem;
+}
+
+.firewall-help p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.connection-target-editor {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 1rem;
+  border: 2px solid var(--line);
+  background: #f2ede2;
+  gap: 0.85rem;
+}
+
+.connection-target-editor legend {
+  padding: 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.connection-target-editor select {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: 2px solid var(--line);
+  border-radius: 0;
+  background: white;
+  color: var(--ink);
+}
+
+.connection-target-editor > small {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.connection-conflict,
+.connection-result {
+  display: flex;
+  padding: 0.75rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  background: var(--yellow);
+  gap: 0.55rem;
+}
+
+.connection-conflict p {
+  width: 100%;
+  margin: 0;
+  font-size: 0.76rem;
+}
+
+.connection-conflict button,
+.connection-result button {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  background: white;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.connection-result {
+  display: grid;
+  background: #f9d7d0;
+  font-size: 0.75rem;
+}
+
+.connection-result.is-success {
+  background: #dcefea;
+}
+
+.connection-result span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.recent-connections {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.recent-connections > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+
+.recent-connections button {
+  min-width: 0;
+  padding: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: white;
+  cursor: pointer;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.host-connection-information {
+  padding-bottom: 1.4rem;
+}
+
+.host-connection-information > :not(.panel-heading) {
+  margin: 1.1rem 1.5rem 0;
+}
+
+.host-connection-information > label {
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.host-connection-information select {
+  width: 100%;
+  padding: 0.7rem;
+  border: 2px solid var(--line);
+  background: white;
+}
+
+.connection-listen-diagnostic {
+  display: grid;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  background: #eee8dc;
+  gap: 0.35rem;
+}
+
+.connection-listen-diagnostic code,
+.connection-listen-diagnostic span {
+  overflow-wrap: anywhere;
+  font-size: 0.7rem;
+}
+
+.connection-information-card {
+  display: grid;
+  padding: 0.9rem;
+  border: 2px solid var(--line);
+  background: var(--paper-light);
+  box-shadow: 3px 3px 0 var(--line);
+  gap: 0.55rem;
+}
+
+.connection-information-card h3,
+.connection-information-card p {
+  margin: 0;
+}
+
+.connection-information-card p {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.connection-info-field {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.connection-info-field span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.connection-info-field code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.7rem;
+}
+
+.connection-info-field button {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  background: white;
+  cursor: copy;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
 .danger-card > button {
   min-height: 2.8rem;
   border: 2px solid var(--coral-dark);

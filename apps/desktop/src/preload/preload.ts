@@ -8,6 +8,8 @@ import {
   BinaryValueSchema,
   CapturePermissionStatusSchema,
   CaptureSourceSchema,
+  ConnectionTestArgsSchema,
+  ConnectionTestResultSchema,
   ConfigureGameSchema,
   CreateRoomArgsSchema,
   DesktopRoomResponseSchema,
@@ -20,7 +22,6 @@ import {
   GameEventSchema,
   GetAvatarArgsSchema,
   GetRelayTaskArgsSchema,
-  InviteSchema,
   IPC_CHANNELS,
   JoinRoomArgsSchema,
   SaveWordPackFileArgsSchema,
@@ -136,8 +137,24 @@ const bridge: DesktopBridge = {
         roomCode
       });
     },
+    refreshNetworks: () =>
+      invoke(
+        IPC_CHANNELS.serverRefreshNetworks,
+        z.undefined(),
+        EmbeddedServerStatusSchema,
+        undefined
+      ),
     onStatus: (listener) =>
       subscribe(IPC_CHANNELS.serverStatus, EmbeddedServerStatusSchema, listener)
+  },
+  connection: {
+    test: (args) =>
+      invoke(
+        IPC_CHANNELS.connectionTest,
+        ConnectionTestArgsSchema,
+        ConnectionTestResultSchema,
+        args
+      )
   },
   replay: {
     revalidate: () =>
@@ -170,9 +187,9 @@ const bridge: DesktopBridge = {
     }
   },
   game: {
-    configure: async (serverUrl) => {
+    configure: async (target) => {
       await invoke(IPC_CHANNELS.gameConfigure, ConfigureGameSchema, z.void(), {
-        serverUrl
+        target
       });
     },
     createRoom: (args) =>
@@ -189,12 +206,12 @@ const bridge: DesktopBridge = {
         DesktopRoomResponseSchema,
         args
       ),
-    resume: (serverUrl) =>
+    resume: (target) =>
       invoke(
         IPC_CHANNELS.gameResume,
         ConfigureGameSchema,
         DesktopRoomResponseSchema.nullable(),
-        { serverUrl }
+        { target }
       ),
     send: async (message) => {
       await invoke(
@@ -306,8 +323,14 @@ const bridge: DesktopBridge = {
     hideToTray: async () => {
       await invoke(IPC_CHANNELS.windowHide, z.undefined(), z.void(), undefined);
     },
-    onInvite: (listener) =>
-      subscribe(IPC_CHANNELS.inviteReceived, InviteSchema, listener)
+    openFirewallSettings: async () => {
+      await invoke(
+        IPC_CHANNELS.systemOpenFirewallSettings,
+        z.undefined(),
+        z.void(),
+        undefined
+      );
+    }
   },
   diagnostics: {
     read: () =>
@@ -428,6 +451,7 @@ const bridge: DesktopBridge = {
 
 Object.freeze(bridge.settings);
 Object.freeze(bridge.server);
+Object.freeze(bridge.connection);
 Object.freeze(bridge.replay);
 Object.freeze(bridge.game);
 Object.freeze(bridge.capture);

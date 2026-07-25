@@ -17,7 +17,6 @@ import {
   IPC_CHANNELS,
   SharingStateSchema,
   type GameEvent,
-  type Invite,
   type SharingState
 } from "../shared/ipc.js";
 import type { CaptureSourceService } from "./capture-source-service.js";
@@ -271,11 +270,6 @@ export class WindowManager {
 
   sendServerStatus(status: unknown): void {
     this.#sendToMain(IPC_CHANNELS.serverStatus, status);
-  }
-
-  sendInvite(invite: Invite): void {
-    this.#sendToMain(IPC_CHANNELS.inviteReceived, invite);
-    this.showMainWindow();
   }
 
   requestStopSharing(): void {

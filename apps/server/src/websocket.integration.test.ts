@@ -114,6 +114,7 @@ function testConfig(): ServerConfig {
     host: "127.0.0.1",
     port: 3000,
     allowedOrigins: new Set(),
+    trustedProxyAddresses: new Set(),
     cookieSecure: false,
     roomIdleTtlMs: 60_000,
     reconnectGraceMs: 1_000,

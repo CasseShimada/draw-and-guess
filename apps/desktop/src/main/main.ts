@@ -4,11 +4,10 @@ import path from "node:path";
 import electronSquirrelStartup from "electron-squirrel-startup";
 import { Notification, app, globalShortcut, powerMonitor, safeStorage } from "electron";
 
-import { PROTOCOL_VERSION } from "@draw-guess/protocol";
+import { ConnectionInfoSchema, PROTOCOL_VERSION } from "@draw-guess/protocol";
 
-import { parseInviteArguments } from "../shared/deep-link.js";
-import type { Invite } from "../shared/ipc.js";
 import { CaptureSourceService } from "./capture-source-service.js";
+import { ConnectionPreflightService } from "./connection-preflight-service.js";
 import { ContentStorageService } from "./content-storage-service.js";
 import { EmbeddedServerService } from "./embedded-server-service.js";
 import {
@@ -37,41 +36,12 @@ if (!hasSingleInstanceLock || electronSquirrelStartup) {
   app.quit();
 }
 
-let pendingInvite: Invite | null = null;
 let activeWindowManager: WindowManager | null = null;
 let shutdownRequested = false;
 let shutdownComplete = false;
 let shutdown: (() => Promise<void>) | null = null;
 
-function deliverInvite(invite: Invite): void {
-  if (activeWindowManager) {
-    activeWindowManager.sendInvite(invite);
-  } else {
-    pendingInvite = invite;
-  }
-}
-
-app.on("second-instance", (_event, argv) => {
-  const invite = parseInviteArguments(argv);
-  if (invite) {
-    deliverInvite(invite);
-  } else {
-    activeWindowManager?.showMainWindow();
-  }
-});
-
-app.on("open-url", (event, url) => {
-  event.preventDefault();
-  const invite = parseInviteArguments([url]);
-  if (invite) {
-    deliverInvite(invite);
-  }
-});
-
-const commandLineInvite = parseInviteArguments(process.argv);
-if (commandLineInvite) {
-  pendingInvite = commandLineInvite;
-}
+app.on("second-instance", () => activeWindowManager?.showMainWindow());
 
 function encryptionProvider(): EncryptionProvider {
   return {
@@ -105,20 +75,28 @@ async function runSmokeCheck(
     true
   )) as Record<string, unknown>;
   const server = (await window.webContents.executeJavaScript(
-    `window.drawGuessDesktop.server.start({ port: 32100, allowLan: false })`,
+    `window.drawGuessDesktop.server.start({ port: 32100, bindMode: "loopback-only", restart: false })`,
     true
   )) as {
     state: string;
-    localUrls: string[];
+    loopbackOrigin: string | null;
+    serverInstanceId: string | null;
   };
-  const healthUrl = server.localUrls[0] ? `${server.localUrls[0]}/health` : null;
+  const healthUrl = server.loopbackOrigin ? `${server.loopbackOrigin}/health` : null;
   const health = healthUrl
     ? ((await (await fetch(healthUrl)).json()) as { ok?: unknown })
     : null;
-  const browserResponse = server.localUrls[0] ? await fetch(server.localUrls[0]) : null;
+  const connectionInfo = server.loopbackOrigin
+    ? ConnectionInfoSchema.parse(
+        await (await fetch(`${server.loopbackOrigin}/api/connection-info`)).json()
+      )
+    : null;
+  const browserResponse = server.loopbackOrigin
+    ? await fetch(server.loopbackOrigin)
+    : null;
   const browserHtml = browserResponse ? await browserResponse.text() : "";
-  const roomResponse = server.localUrls[0]
-    ? await fetch(`${server.localUrls[0]}/api/desktop/rooms`, {
+  const roomResponse = server.loopbackOrigin
+    ? await fetch(`${server.loopbackOrigin}/api/desktop/rooms`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -148,6 +126,41 @@ async function runSmokeCheck(
       typeof roomBody.snapshot?.roomCode === "string",
     desktopCookieIssued: Boolean(roomResponse?.headers.get("set-cookie"))
   };
+  const networkUi = (await window.webContents.executeJavaScript(
+    `new Promise((resolve) => {
+      const joinButton = [...document.querySelectorAll("button")].find(
+        (button) => button.textContent?.trim() === "加入房间"
+      );
+      joinButton?.click();
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const labels = [...document.querySelectorAll("label")];
+        const addressLabel = labels.find((label) =>
+          label.textContent?.includes("服务器地址或 IP")
+        );
+        const portLabel = labels.find((label) =>
+          label.textContent?.trim().startsWith("端口")
+        );
+        const securityLabel = labels.find((label) =>
+          label.textContent?.includes("连接安全性")
+        );
+        const bindMode = labels.find((label) =>
+          label.textContent?.includes("绑定模式")
+        );
+        resolve({
+          addressIsText:
+            addressLabel?.querySelector("input")?.getAttribute("type") === "text",
+          hasPort: portLabel?.querySelector("input")?.getAttribute("type") === "number",
+          hasSecurity: Boolean(securityLabel?.querySelector("select")),
+          hasBindModes:
+            bindMode?.textContent?.includes("仅本机") === true &&
+            bindMode?.textContent?.includes("局域网 / 可做端口转发") === true,
+          noExternalInviteBridge:
+            typeof window.drawGuessDesktop.app.onInvite === "undefined"
+        });
+      }));
+    })`,
+    true
+  )) as Record<string, unknown>;
   const themeSource = path.join(app.getPath("userData"), "smoke-theme-source");
   mkdirSync(themeSource, { recursive: true });
   copyFileSync(
@@ -198,18 +211,27 @@ async function runSmokeCheck(
           renderer.bridge === "object" &&
           server.state === "running" &&
           health?.ok === true &&
+          connectionInfo?.protocolVersion === PROTOCOL_VERSION &&
+          connectionInfo.serverInstanceId === server.serverInstanceId &&
           embedded.browserStatus === 200 &&
           embedded.browserEntryPresent &&
           embedded.desktopRoomStatus === 201 &&
           embedded.desktopSessionIssued &&
           !embedded.desktopCookieIssued &&
+          networkUi.addressIsText === true &&
+          networkUi.hasPort === true &&
+          networkUi.hasSecurity === true &&
+          networkUi.hasBindModes === true &&
+          networkUi.noExternalInviteBridge === true &&
           themeRuntime.assetLoaded &&
           themeRuntime.marker === "packaged-theme-ready",
         protocolVersion: PROTOCOL_VERSION,
         renderer,
         server,
         health,
+        connectionInfo,
         embedded,
+        networkUi,
         theme: {
           status: theme.status,
           runtime: themeRuntime,
@@ -231,14 +253,6 @@ async function boot(): Promise<void> {
   if (process.platform === "win32") {
     app.setAppUserModelId("com.drawguess.desktop");
   }
-  if (app.isPackaged) {
-    app.setAsDefaultProtocolClient("drawguess");
-  } else {
-    app.setAsDefaultProtocolClient("drawguess", process.execPath, [
-      path.resolve(process.argv[1] ?? ".")
-    ]);
-  }
-
   const logger = new RedactingLogger(path.join(app.getPath("userData"), "logs"));
   const settings = new SettingsService(app.getPath("userData"), encryptionProvider());
   await settings.initialize();
@@ -274,10 +288,12 @@ async function boot(): Promise<void> {
         maxJobBytes: settings.settings.replayMaxJobGiB * 1024 ** 3,
         maxTotalTemporaryBytes: settings.settings.replayMaxTemporaryGiB * 1024 ** 3,
         minimumFreeBytes: settings.settings.replayMinimumFreeGiB * 1024 ** 3
-      })
+      }),
+      publicEndpoint: () => settings.settings.publicEndpoint?.target ?? null
     }
   );
-  const gameClient = new GameClientService(settings, logger);
+  const connectionPreflight = new ConnectionPreflightService(settings, logger);
+  const gameClient = new GameClientService(settings, logger, connectionPreflight);
   const notifications = new FixedNotificationService({
     enabled: () => settings.settings.notificationsEnabled,
     supported: () => Notification.isSupported(),
@@ -321,6 +337,7 @@ async function boot(): Promise<void> {
     settings,
     embeddedServer,
     gameClient,
+    connectionPreflight,
     notifications,
     loginItems,
     captureSources,
@@ -376,11 +393,6 @@ async function boot(): Promise<void> {
   powerMonitor.on("shutdown", () => {
     void shutdown?.();
   });
-
-  if (pendingInvite) {
-    windowManager.sendInvite(pendingInvite);
-    pendingInvite = null;
-  }
 
   const smokeResultPath = process.env.DRAW_GUESS_SMOKE_RESULT;
   if (smokeResultPath) {

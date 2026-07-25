@@ -12,42 +12,85 @@ import {
   EmbeddedServerStatusSchema,
   type EmbeddedServerStatus
 } from "../shared/ipc.js";
+import {
+  isLinkLocalIpv4,
+  isPrivateIpv4,
+  normalizeConnectionTarget,
+  type ConnectionTarget
+} from "../shared/server-url.js";
 import type { RedactingLogger } from "./redacting-logger.js";
 
 type StatusListener = (status: EmbeddedServerStatus) => void;
+type HostBindMode = EmbeddedServerStatus["bindMode"];
 
 export interface EmbeddedServerServiceOptions {
   replayConfig?: () => ReplayHostConfig;
+  publicEndpoint?: () => ConnectionTarget | null;
 }
 
-function initialStatus(): EmbeddedServerStatus {
+function initialStatus(bindMode: HostBindMode = "loopback-only"): EmbeddedServerStatus {
   return {
     state: "stopped",
+    bindMode,
+    boundHost: null,
     requestedPort: null,
     actualPort: null,
-    allowLan: false,
-    localUrls: [],
-    lanUrls: [],
-    usedFallbackPort: false,
+    serverInstanceId: null,
+    loopbackOrigin: null,
+    lanAddresses: [],
+    executablePath: process.execPath,
     error: null
   };
 }
 
-function localNetworkAddresses(): string[] {
-  const addresses = new Set<string>();
-  for (const entries of Object.values(networkInterfaces())) {
+function addressId(interfaceName: string, address: string): string {
+  return `${interfaceName}:${address}`;
+}
+
+export function enumerateLanAddresses(): EmbeddedServerStatus["lanAddresses"] {
+  const addresses: EmbeddedServerStatus["lanAddresses"] = [];
+  for (const [interfaceName, entries] of Object.entries(networkInterfaces())) {
     for (const entry of entries ?? []) {
       if (
-        entry.family === "IPv4" &&
-        !entry.internal &&
-        entry.address !== "0.0.0.0" &&
-        !entry.address.startsWith("169.254.")
+        entry.family !== "IPv4" ||
+        entry.internal ||
+        entry.address === "0.0.0.0" ||
+        entry.address.startsWith("127.")
       ) {
-        addresses.add(entry.address);
+        continue;
       }
+      const kind = isPrivateIpv4(entry.address)
+        ? "private"
+        : isLinkLocalIpv4(entry.address)
+          ? "link-local"
+          : "other";
+      addresses.push({
+        id: addressId(interfaceName, entry.address),
+        interfaceName,
+        address: entry.address,
+        netmask: entry.netmask,
+        cidr: entry.cidr ?? null,
+        kind,
+        recommended: kind === "private"
+      });
     }
   }
-  return [...addresses].sort();
+  const rank = { private: 0, other: 1, "link-local": 2 } as const;
+  return addresses.sort(
+    (left, right) =>
+      rank[left.kind] - rank[right.kind] ||
+      left.interfaceName.localeCompare(right.interfaceName) ||
+      left.address.localeCompare(right.address)
+  );
+}
+
+function errorCode(error: unknown): string | null {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+    ? error.code
+    : null;
 }
 
 export class EmbeddedServerService {
@@ -59,6 +102,8 @@ export class EmbeddedServerService {
   #running: RunningServer | null = null;
   #status = initialStatus();
   #operation: Promise<EmbeddedServerStatus> | null = null;
+  #configuredPublicOrigin: string | null = null;
+  #networkRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     webRoot: string,
@@ -79,11 +124,15 @@ export class EmbeddedServerService {
     return () => this.#listeners.delete(listener);
   }
 
-  async start(port: number, allowLan: boolean): Promise<EmbeddedServerStatus> {
+  async start(
+    port: number,
+    bindMode: HostBindMode,
+    restart = false
+  ): Promise<EmbeddedServerStatus> {
     if (this.#operation) {
       return this.#operation;
     }
-    this.#operation = this.#start(port, allowLan).finally(() => {
+    this.#operation = this.#start(port, bindMode, restart).finally(() => {
       this.#operation = null;
     });
     return this.#operation;
@@ -94,16 +143,35 @@ export class EmbeddedServerService {
       await this.#operation.catch(() => undefined);
     }
     if (!this.#running) {
-      this.#setStatus(initialStatus());
+      this.#setStatus(initialStatus(this.#status.bindMode));
       return this.status;
     }
     this.#setStatus({ ...this.#status, state: "stopping", error: null });
-    const running = this.#running;
-    this.#running = null;
-    await running.close();
-    this.#logger.info("内置服务器已停止", { port: running.port });
-    this.#setStatus(initialStatus());
+    await this.#closeRunning();
+    this.#setStatus(initialStatus(this.#status.bindMode));
     return this.status;
+  }
+
+  refreshNetworks(): EmbeddedServerStatus {
+    this.#setStatus({
+      ...this.#status,
+      lanAddresses:
+        this.#status.state === "running" && this.#status.bindMode === "lan"
+          ? enumerateLanAddresses()
+          : []
+    });
+    return this.status;
+  }
+
+  configurePublicEndpoint(target: ConnectionTarget | null): void {
+    const nextOrigin = target ? normalizeConnectionTarget(target).origin : null;
+    if (this.#running && this.#configuredPublicOrigin) {
+      this.#running.config.allowedOrigins.delete(this.#configuredPublicOrigin);
+    }
+    this.#configuredPublicOrigin = nextOrigin;
+    if (this.#running && nextOrigin) {
+      this.#running.config.allowedOrigins.add(nextOrigin);
+    }
   }
 
   pause(roomCode: string): void {
@@ -137,63 +205,126 @@ export class EmbeddedServerService {
     );
   }
 
-  async #start(port: number, allowLan: boolean): Promise<EmbeddedServerStatus> {
+  async #start(
+    port: number,
+    bindMode: HostBindMode,
+    restart: boolean
+  ): Promise<EmbeddedServerStatus> {
     if (this.#running) {
-      const previous = this.#running;
-      this.#running = null;
-      await previous.close();
+      if (this.#status.actualPort === port && this.#status.bindMode === bindMode) {
+        return this.status;
+      }
+      if (!restart) {
+        throw new Error("更改监听端口或模式需要明确确认并重启房间服务");
+      }
+      this.#setStatus({ ...this.#status, state: "stopping", error: null });
+      await this.#closeRunning();
     }
+    const boundHost = bindMode === "lan" ? "0.0.0.0" : "127.0.0.1";
     this.#setStatus({
-      ...initialStatus(),
+      ...initialStatus(bindMode),
       state: "starting",
+      boundHost,
       requestedPort: port,
-      allowLan
+      lanAddresses: bindMode === "lan" ? enumerateLanAddresses() : []
     });
     try {
+      const configuredPublicTarget = this.#options.publicEndpoint?.() ?? null;
+      this.#configuredPublicOrigin = configuredPublicTarget
+        ? normalizeConnectionTarget(configuredPublicTarget).origin
+        : null;
       const running = await startServer({
-        host: allowLan ? "0.0.0.0" : "127.0.0.1",
+        host: boundHost,
         port,
-        findAvailablePort: true,
-        maxPortAttempts: 20,
+        findAvailablePort: false,
         webRoot: this.#webRoot,
         hostControlKey: this.#hostControlKey,
-        replayConfig: this.#options.replayConfig?.()
+        replayConfig: this.#options.replayConfig?.(),
+        additionalAllowedOrigins: this.#configuredPublicOrigin
+          ? [this.#configuredPublicOrigin]
+          : [],
+        trustedProxyAddresses: ["127.0.0.1", "::1"]
       });
       this.#running = running;
-      const localUrl = `http://127.0.0.1:${String(running.port)}`;
-      const lanUrls = allowLan
-        ? localNetworkAddresses().map(
-            (address) => `http://${address}:${String(running.port)}`
-          )
-        : [];
+      const loopbackOrigin = `http://127.0.0.1:${String(running.port)}`;
       this.#setStatus({
         state: "running",
+        bindMode,
+        boundHost,
         requestedPort: port,
         actualPort: running.port,
-        allowLan,
-        localUrls: [localUrl],
-        lanUrls,
-        usedFallbackPort: running.usedFallbackPort,
+        serverInstanceId: running.serverInstanceId,
+        loopbackOrigin,
+        lanAddresses: bindMode === "lan" ? enumerateLanAddresses() : [],
+        executablePath: process.execPath,
         error: null
       });
+      this.#startNetworkMonitor();
       this.#logger.info("内置服务器已启动", {
         requestedPort: port,
         actualPort: running.port,
-        allowLan,
-        usedFallbackPort: running.usedFallbackPort
+        bindMode,
+        boundHost,
+        serverInstanceId: running.serverInstanceId
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "内置服务器启动失败";
-      this.#logger.error("内置服务器启动失败", { message, port, allowLan });
+      const code = errorCode(error);
+      const rawMessage = error instanceof Error ? error.message : "内置服务器启动失败";
+      const message =
+        code === "EADDRINUSE"
+          ? `端口 ${String(port)} 已被占用，请关闭占用程序或选择其它端口`
+          : rawMessage;
+      this.#logger.error("内置服务器启动失败", {
+        message: rawMessage,
+        code,
+        port,
+        bindMode
+      });
       this.#setStatus({
-        ...initialStatus(),
+        ...initialStatus(bindMode),
         state: "error",
+        boundHost,
         requestedPort: port,
-        allowLan,
+        lanAddresses: bindMode === "lan" ? enumerateLanAddresses() : [],
         error: `无法启动房间服务：${message}`
       });
     }
     return this.status;
+  }
+
+  async #closeRunning(): Promise<void> {
+    this.#stopNetworkMonitor();
+    const running = this.#running;
+    this.#running = null;
+    if (!running) {
+      return;
+    }
+    await running.close();
+    this.#logger.info("内置服务器已停止", { port: running.port });
+  }
+
+  #startNetworkMonitor(): void {
+    this.#stopNetworkMonitor();
+    if (this.#status.bindMode !== "lan") {
+      return;
+    }
+    this.#networkRefreshTimer = setInterval(() => {
+      if (this.#status.state !== "running" || this.#status.bindMode !== "lan") {
+        return;
+      }
+      const next = enumerateLanAddresses();
+      if (JSON.stringify(next) !== JSON.stringify(this.#status.lanAddresses)) {
+        this.#setStatus({ ...this.#status, lanAddresses: next });
+      }
+    }, 5_000);
+    this.#networkRefreshTimer.unref();
+  }
+
+  #stopNetworkMonitor(): void {
+    if (this.#networkRefreshTimer) {
+      clearInterval(this.#networkRefreshTimer);
+      this.#networkRefreshTimer = null;
+    }
   }
 
   #setStatus(status: EmbeddedServerStatus): void {

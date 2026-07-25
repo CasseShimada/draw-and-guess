@@ -1,8 +1,11 @@
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { CONTENT_LIMITS, WordPoolUploadSchema } from "@draw-guess/content";
 import {
+  APPLICATION_VERSION,
+  ConnectionInfoSchema,
   CreateRoomRequestSchema,
   ErrorCode,
   JoinRoomRequestSchema,
@@ -73,6 +76,10 @@ export interface CreateAppOptions {
   startCleanup?: boolean;
   hostControlKey?: string | null;
   replayConfig?: ReplayHostConfig;
+  appVersion?: string;
+  serverInstanceId?: string;
+  additionalAllowedOrigins?: readonly string[];
+  trustedProxyAddresses?: readonly string[];
 }
 
 function defaultWebRoot(): string {
@@ -144,23 +151,52 @@ function assertAccessRoom(
 }
 
 function setSessionCookie(
+  request: FastifyRequest,
   reply: FastifyReply,
   token: string,
   config: ServerConfig
 ): void {
+  const remoteAddress = request.raw.socket.remoteAddress ?? "";
+  const normalizedRemoteAddress = remoteAddress.startsWith("::ffff:")
+    ? remoteAddress.slice("::ffff:".length)
+    : remoteAddress;
+  const forwardedProtocol = singleHeader(request.headers["x-forwarded-proto"]);
+  const forwardedHost = singleHeader(request.headers["x-forwarded-host"]);
+  const secureFromTrustedProxy =
+    config.trustedProxyAddresses.has(normalizedRemoteAddress) &&
+    forwardedProtocol === "https" &&
+    Boolean(forwardedHost) &&
+    config.allowedOrigins.has(`https://${forwardedHost}`);
   reply.setCookie(SESSION_COOKIE, token, {
     path: "/",
     httpOnly: true,
     sameSite: "lax",
-    secure: config.cookieSecure,
+    secure: config.cookieSecure || secureFromTrustedProxy,
     maxAge: 7 * 24 * 60 * 60
   });
 }
 
-export async function createApp(
-  options: CreateAppOptions = {}
-): Promise<{ app: FastifyInstance; service: GameService; config: ServerConfig }> {
-  const config = options.config ?? loadConfig();
+export async function createApp(options: CreateAppOptions = {}): Promise<{
+  app: FastifyInstance;
+  service: GameService;
+  config: ServerConfig;
+  serverInstanceId: string;
+}> {
+  const baseConfig = options.config ?? loadConfig();
+  const config: ServerConfig = {
+    ...baseConfig,
+    allowedOrigins: new Set([
+      ...baseConfig.allowedOrigins,
+      ...(options.additionalAllowedOrigins ?? [])
+    ]),
+    trustedProxyAddresses: new Set([
+      ...baseConfig.trustedProxyAddresses,
+      ...(options.trustedProxyAddresses ?? [])
+    ])
+  };
+  const serverInstanceId =
+    options.serverInstanceId ?? randomBytes(32).toString("base64url");
+  const appVersion = options.appVersion ?? APPLICATION_VERSION;
   const service =
     options.service ??
     GameService.fromConfig(config, {
@@ -217,6 +253,22 @@ export async function createApp(
     now: Date.now()
   }));
 
+  app.get("/api/connection-info", (_request, reply) => {
+    reply.header("Cache-Control", "no-store").type("application/json; charset=utf-8");
+    return ConnectionInfoSchema.parse({
+      service: "draw-guess",
+      appVersion,
+      protocolVersion: PROTOCOL_VERSION,
+      serverInstanceId,
+      now: Date.now(),
+      websocketPath: "/ws",
+      capabilities: {
+        browser: true,
+        desktop: true
+      }
+    });
+  });
+
   app.post("/api/rooms", async (request, reply) => {
     const parsed = CreateRoomRequestSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -227,7 +279,7 @@ export async function createApp(
       parsed.data.password,
       "browser"
     );
-    setSessionCookie(reply, result.sessionToken, config);
+    setSessionCookie(request, reply, result.sessionToken, config);
     reply.code(201);
     return { snapshot: result.snapshot };
   });
@@ -244,7 +296,7 @@ export async function createApp(
       body.data.password,
       "browser"
     );
-    setSessionCookie(reply, result.sessionToken, config);
+    setSessionCookie(request, reply, result.sessionToken, config);
     return { snapshot: result.snapshot };
   });
 
@@ -631,5 +683,5 @@ export async function createApp(
     });
   });
 
-  return { app, service, config };
+  return { app, service, config, serverInstanceId };
 }

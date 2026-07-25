@@ -13,6 +13,7 @@ import {
 } from "@draw-guess/shared-types";
 
 export const PROTOCOL_VERSION = 4;
+export const APPLICATION_VERSION = "0.5.0";
 export const MAX_JSON_MESSAGE_BYTES = 16 * 1024;
 export const MAX_ENCODED_IMAGE_BYTES = 2 * 1024 * 1024;
 export const MAX_FRAME_PACKET_BYTES = MAX_ENCODED_IMAGE_BYTES + 8;
@@ -33,6 +34,25 @@ export const ErrorCode = {
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+export const ConnectionInfoSchema = z
+  .object({
+    service: z.literal("draw-guess"),
+    appVersion: z.string().min(1).max(64),
+    protocolVersion: z.number().int().positive(),
+    serverInstanceId: z.string().min(32).max(160),
+    now: z.number().finite(),
+    websocketPath: z.literal("/ws"),
+    capabilities: z
+      .object({
+        browser: z.literal(true),
+        desktop: z.literal(true)
+      })
+      .strict()
+  })
+  .strict();
+
+export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>;
 
 const NicknameSchema = z
   .string()

@@ -17,6 +17,8 @@ import {
   BootstrapSchema,
   CapturePermissionStatusSchema,
   CaptureSourceSchema,
+  ConnectionTestArgsSchema,
+  ConnectionTestResultSchema,
   ConfigureGameSchema,
   CreateRoomArgsSchema,
   DesktopRoomResponseSchema,
@@ -54,6 +56,7 @@ import {
   sanitizeExportFilename
 } from "@draw-guess/content";
 import type { CaptureSourceService } from "./capture-source-service.js";
+import type { ConnectionPreflightService } from "./connection-preflight-service.js";
 import type { ContentStorageService } from "./content-storage-service.js";
 import type { EmbeddedServerService } from "./embedded-server-service.js";
 import type { GameClientService } from "./game-client-service.js";
@@ -76,6 +79,7 @@ interface IpcServices {
   settings: SettingsService;
   embeddedServer: EmbeddedServerService;
   gameClient: GameClientService;
+  connectionPreflight: ConnectionPreflightService;
   notifications: FixedNotificationService;
   loginItems: LoginItemService;
   captureSources: CaptureSourceService;
@@ -156,6 +160,11 @@ export function registerIpcHandlers(services: IpcServices): () => void {
           await services.loginItems.apply(nextLaunchAtLogin, nextMinimizeToTray);
         }
         const next = await services.settings.update(patch);
+        if (patch.publicEndpoint !== undefined) {
+          services.embeddedServer.configurePublicEndpoint(
+            next.publicEndpoint?.target ?? null
+          );
+        }
         return next;
       } catch (error) {
         if (loginItemChanged) {
@@ -181,6 +190,7 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     const next = await services.settings.reset();
     await services.content.reset();
     await services.theme.delete();
+    services.embeddedServer.configurePublicEndpoint(null);
     await services.windowManager.applyCustomCss(null);
     services.tray.updateTheme(false);
     globalShortcut.unregister(previousShortcut);
@@ -242,15 +252,21 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     IPC_CHANNELS.serverStart,
     StartServerArgsSchema,
     EmbeddedServerStatusSchema,
-    async ({ port, allowLan }) => {
-      const status = await services.embeddedServer.start(port, allowLan);
-      if (status.state === "running" && status.localUrls[0]) {
+    async ({ port, bindMode, restart }) => {
+      if (restart && services.embeddedServer.status.state === "running") {
+        await services.gameClient.disconnect();
+      }
+      const status = await services.embeddedServer.start(port, bindMode, restart);
+      if (status.state === "running" && status.actualPort) {
         await services.settings.update({
           hostPort: port,
-          allowLan,
-          serverUrl: status.localUrls[0]
+          hostBindMode: bindMode
         });
-        await services.gameClient.configure(status.localUrls[0]);
+        await services.gameClient.configure({
+          host: "127.0.0.1",
+          port: status.actualPort,
+          security: "http"
+        });
       }
       return status;
     }
@@ -272,6 +288,21 @@ export function registerIpcHandlers(services: IpcServices): () => void {
 
   handle(IPC_CHANNELS.serverResume, HostRoomArgsSchema, z.void(), ({ roomCode }) =>
     services.embeddedServer.resume(roomCode)
+  );
+
+  handle(
+    IPC_CHANNELS.serverRefreshNetworks,
+    z.undefined(),
+    EmbeddedServerStatusSchema,
+    () => services.embeddedServer.refreshNetworks()
+  );
+
+  handle(
+    IPC_CHANNELS.connectionTest,
+    ConnectionTestArgsSchema,
+    ConnectionTestResultSchema,
+    ({ target, confirmInsecureHttp }) =>
+      services.connectionPreflight.test(target, confirmInsecureHttp)
   );
 
   handle(IPC_CHANNELS.replayRevalidate, z.undefined(), ReplayHostCapabilitySchema, () =>
@@ -325,30 +356,36 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     IPC_CHANNELS.gameConfigure,
     ConfigureGameSchema,
     z.void(),
-    async ({ serverUrl }) => services.gameClient.configure(serverUrl)
+    async ({ target }) => services.gameClient.configure(target)
   );
 
   handle(
     IPC_CHANNELS.gameCreateRoom,
     CreateRoomArgsSchema,
     DesktopRoomResponseSchema,
-    async ({ serverUrl, nickname, password }) =>
-      services.gameClient.createRoom(serverUrl, nickname, password)
+    async ({ target, nickname, password, confirmInsecureHttp }) =>
+      services.gameClient.createRoom(target, nickname, password, confirmInsecureHttp)
   );
 
   handle(
     IPC_CHANNELS.gameJoinRoom,
     JoinRoomArgsSchema,
     DesktopRoomResponseSchema,
-    async ({ serverUrl, roomCode, nickname, password }) =>
-      services.gameClient.joinRoom(serverUrl, roomCode, nickname, password)
+    async ({ target, roomCode, nickname, password, confirmInsecureHttp }) =>
+      services.gameClient.joinRoom(
+        target,
+        roomCode,
+        nickname,
+        password,
+        confirmInsecureHttp
+      )
   );
 
   handle(
     IPC_CHANNELS.gameResume,
     ConfigureGameSchema,
     DesktopRoomResponseSchema.nullable(),
-    async ({ serverUrl }) => services.gameClient.resume(serverUrl)
+    async ({ target }) => services.gameClient.resume(target)
   );
 
   handle(IPC_CHANNELS.gameSend, DesktopClientMessageSchema, z.void(), (message) =>
@@ -458,6 +495,13 @@ export function registerIpcHandlers(services: IpcServices): () => void {
 
   handle(IPC_CHANNELS.windowHide, z.undefined(), z.void(), () => {
     services.windowManager.mainWindow?.hide();
+  });
+
+  handle(IPC_CHANNELS.systemOpenFirewallSettings, z.undefined(), z.void(), async () => {
+    if (process.platform !== "win32") {
+      throw new Error("请在系统设置中手动打开防火墙或网络安全页面");
+    }
+    await shell.openExternal("ms-settings:windowsdefender-firewall");
   });
 
   handle(

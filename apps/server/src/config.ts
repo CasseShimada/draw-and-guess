@@ -9,6 +9,7 @@ const EnvironmentSchema = z.object({
   HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   ALLOWED_ORIGINS: z.string().default("http://127.0.0.1:5173,http://localhost:5173"),
+  TRUSTED_PROXY_ADDRESSES: z.string().default(""),
   COOKIE_SECURE: BooleanStringSchema,
   ROOM_IDLE_TTL_MS: z.coerce.number().int().min(60_000).default(1_800_000),
   RECONNECT_GRACE_MS: z.coerce.number().int().min(1_000).default(10_000),
@@ -20,6 +21,7 @@ export interface ServerConfig {
   host: string;
   port: number;
   allowedOrigins: Set<string>;
+  trustedProxyAddresses: Set<string>;
   cookieSecure: boolean;
   roomIdleTtlMs: number;
   reconnectGraceMs: number;
@@ -35,6 +37,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Server
     allowedOrigins: new Set(
       parsed.ALLOWED_ORIGINS.split(",")
         .map((origin) => origin.trim())
+        .filter(Boolean)
+    ),
+    trustedProxyAddresses: new Set(
+      parsed.TRUSTED_PROXY_ADDRESSES.split(",")
+        .map((address) => address.trim())
         .filter(Boolean)
     ),
     cookieSecure: parsed.COOKIE_SECURE,

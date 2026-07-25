@@ -39,12 +39,6 @@ const config: ForgeConfig = {
       /^\/tsconfig\.json$/,
       /^\/index\.html$/
     ],
-    protocols: [
-      {
-        name: "画猜现场邀请",
-        schemes: ["drawguess"]
-      }
-    ],
     win32metadata: {
       CompanyName: "Draw Guess Contributors",
       FileDescription: "画猜现场",

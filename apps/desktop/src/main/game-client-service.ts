@@ -26,7 +26,13 @@ import {
   UploadWordPoolResultSchema,
   type GameEvent
 } from "../shared/ipc.js";
-import { normalizeServerUrl, websocketUrl } from "../shared/server-url.js";
+import {
+  normalizeConnectionTarget,
+  websocketUrl,
+  type ConnectionTarget,
+  type NormalizedConnectionTarget
+} from "../shared/server-url.js";
+import type { ConnectionPreflightService } from "./connection-preflight-service.js";
 import type { RedactingLogger } from "./redacting-logger.js";
 import type { SettingsService } from "./settings-service.js";
 
@@ -64,8 +70,10 @@ function asUint8Array(data: RawData): Uint8Array {
 export class GameClientService {
   readonly #settings: SettingsService;
   readonly #logger: RedactingLogger;
+  readonly #preflight: ConnectionPreflightService;
   readonly #listeners = new Set<EventListener>();
-  #serverUrl: string;
+  readonly #requestControllers = new Set<AbortController>();
+  #target: NormalizedConnectionTarget;
   #token: string | null = null;
   #socket: WebSocket | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -74,14 +82,19 @@ export class GameClientService {
   #epoch = 0;
   #manualDisconnect = true;
 
-  constructor(settings: SettingsService, logger: RedactingLogger) {
+  constructor(
+    settings: SettingsService,
+    logger: RedactingLogger,
+    preflight: ConnectionPreflightService
+  ) {
     this.#settings = settings;
     this.#logger = logger;
-    this.#serverUrl = settings.settings.serverUrl;
+    this.#preflight = preflight;
+    this.#target = normalizeConnectionTarget(settings.settings.currentClientTarget);
   }
 
-  get serverUrl(): string {
-    return this.#serverUrl;
+  get target(): NormalizedConnectionTarget {
+    return structuredClone(this.#target);
   }
 
   onEvent(listener: EventListener): () => void {
@@ -89,22 +102,30 @@ export class GameClientService {
     return () => this.#listeners.delete(listener);
   }
 
-  async configure(serverUrlInput: string): Promise<void> {
-    const serverUrl = normalizeServerUrl(serverUrlInput);
-    if (serverUrl !== this.#serverUrl) {
+  async configure(targetInput: ConnectionTarget): Promise<void> {
+    const target = normalizeConnectionTarget(targetInput);
+    if (target.origin !== this.#target.origin) {
       await this.disconnect();
-      this.#serverUrl = serverUrl;
+      this.#target = target;
       this.#token = null;
     }
-    await this.#settings.update({ serverUrl });
+    await this.#settings.update({
+      currentClientTarget: {
+        host: target.host,
+        port: target.port,
+        security: target.security
+      }
+    });
   }
 
   async createRoom(
-    serverUrlInput: string,
+    targetInput: ConnectionTarget,
     nickname: string,
-    password: string
+    password: string,
+    confirmInsecureHttp = false
   ): Promise<z.infer<typeof DesktopRoomResponseSchema>> {
-    await this.configure(serverUrlInput);
+    await this.#requireSuccessfulPreflight(targetInput, confirmInsecureHttp);
+    await this.configure(targetInput);
     const response = await this.#request("/api/desktop/rooms", {
       method: "POST",
       body: JSON.stringify({ nickname, password })
@@ -115,12 +136,17 @@ export class GameClientService {
   }
 
   async joinRoom(
-    serverUrlInput: string,
+    targetInput: ConnectionTarget,
     roomCode: string,
     nickname: string,
-    password: string
+    password: string,
+    confirmInsecureHttp = false
   ): Promise<z.infer<typeof DesktopRoomResponseSchema>> {
-    await this.configure(serverUrlInput);
+    const preflight = await this.#requireSuccessfulPreflight(
+      targetInput,
+      confirmInsecureHttp
+    );
+    await this.configure(preflight.target);
     const response = await this.#request(
       `/api/desktop/rooms/${encodeURIComponent(roomCode)}/join`,
       {
@@ -130,14 +156,15 @@ export class GameClientService {
     );
     const session = DesktopSessionResponseSchema.parse(response);
     await this.#acceptSession(session.sessionToken, session.expiresAt);
+    await this.#settings.addRecentConnection(this.#target);
     return DesktopRoomResponseSchema.parse({ snapshot: session.snapshot });
   }
 
   async resume(
-    serverUrlInput: string
+    targetInput: ConnectionTarget
   ): Promise<z.infer<typeof DesktopRoomResponseSchema> | null> {
-    await this.configure(serverUrlInput);
-    const token = await this.#settings.session(this.#serverUrl);
+    await this.configure(targetInput);
+    const token = await this.#settings.session(this.#target);
     if (!token) {
       return null;
     }
@@ -152,7 +179,7 @@ export class GameClientService {
       return parsed;
     } catch (error) {
       if (error instanceof DesktopRequestError && error.status === 401) {
-        await this.#settings.clearSession(this.#serverUrl);
+        await this.#settings.clearSession(this.#target);
         this.#token = null;
         return null;
       }
@@ -341,6 +368,10 @@ export class GameClientService {
     this.#manualDisconnect = true;
     this.#epoch += 1;
     this.#clearTimers();
+    for (const controller of this.#requestControllers) {
+      controller.abort();
+    }
+    this.#requestControllers.clear();
     const socket = this.#socket;
     this.#socket = null;
     if (socket && socket.readyState < WebSocket.CLOSING) {
@@ -352,13 +383,13 @@ export class GameClientService {
 
   async clearSession(): Promise<void> {
     await this.disconnect();
-    await this.#settings.clearSession(this.#serverUrl);
+    await this.#settings.clearSession(this.#target);
     this.#token = null;
   }
 
   async #acceptSession(token: string, expiresAt: number): Promise<void> {
     this.#token = token;
-    await this.#settings.saveSession(this.#serverUrl, token, expiresAt);
+    await this.#settings.saveSession(this.#target, token, expiresAt);
     this.#connect(false);
   }
 
@@ -379,7 +410,7 @@ export class GameClientService {
       state: reconnecting ? "reconnecting" : "connecting"
     });
     const socket = new WebSocket(
-      `${websocketUrl(this.#serverUrl)}?protocolVersion=${String(PROTOCOL_VERSION)}`,
+      `${websocketUrl(this.#target)}?protocolVersion=${String(PROTOCOL_VERSION)}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -492,21 +523,33 @@ export class GameClientService {
       allowNotFound?: boolean;
     }
   ): Promise<Response> {
-    const response = await fetch(`${this.#serverUrl}${pathname}`, {
-      method: options.method,
-      headers: {
-        Accept: "application/json",
-        ...(options.body
-          ? { "Content-Type": options.contentType ?? "application/json" }
-          : {}),
-        "X-Draw-Guess-Client": "desktop",
-        "X-Draw-Guess-Protocol": String(PROTOCOL_VERSION),
-        ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
-      },
-      ...(options.body ? { body: options.body } : {}),
-      signal: AbortSignal.timeout(10_000),
-      redirect: "error"
-    });
+    const epoch = this.#epoch;
+    const controller = new AbortController();
+    this.#requestControllers.add(controller);
+    let response: Response;
+    try {
+      response = await fetch(`${this.#target.origin}${pathname}`, {
+        method: options.method,
+        headers: {
+          Accept: "application/json",
+          ...(options.body
+            ? { "Content-Type": options.contentType ?? "application/json" }
+            : {}),
+          "X-Draw-Guess-Client": "desktop",
+          "X-Draw-Guess-Protocol": String(PROTOCOL_VERSION),
+          ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
+        },
+        ...(options.body ? { body: options.body } : {}),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+        redirect: "error"
+      });
+    } finally {
+      this.#requestControllers.delete(controller);
+    }
+    if (epoch !== this.#epoch) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error("连接目标已更改，旧服务器响应已丢弃");
+    }
     if (!response.ok && !(options.allowNotFound && response.status === 404)) {
       const body = (await response.json().catch(() => null)) as unknown;
       const parsed = ApiErrorSchema.safeParse(body);
@@ -525,6 +568,17 @@ export class GameClientService {
       throw new Error("桌面会话不存在，请重新加入房间");
     }
     return this.#token;
+  }
+
+  async #requireSuccessfulPreflight(
+    target: ConnectionTarget,
+    confirmInsecureHttp: boolean
+  ) {
+    const result = await this.#preflight.test(target, confirmInsecureHttp);
+    if (!result.ok) {
+      throw new Error(result.message);
+    }
+    return result;
   }
 
   #emit(eventInput: GameEvent): void {

@@ -26,6 +26,7 @@ export interface RunningServer {
   port: number;
   requestedPort: number;
   usedFallbackPort: boolean;
+  serverInstanceId: string;
   url: string;
   close(): Promise<void>;
 }
@@ -74,7 +75,7 @@ export async function startServer(
       ...options,
       config
     });
-    const { app, service } = built;
+    const { app, service, serverInstanceId } = built;
     try {
       await app.listen({ host, port: candidatePort });
       const address = app.server.address() as AddressInfo | null;
@@ -87,11 +88,12 @@ export async function startServer(
       return {
         app,
         service,
-        config: { ...config, port },
+        config: { ...built.config, host, port },
         host,
         port,
         requestedPort,
         usedFallbackPort: requestedPort !== 0 && port !== requestedPort,
+        serverInstanceId,
         url: `http://${displayHost}:${String(port)}`,
         async close() {
           if (closed) {

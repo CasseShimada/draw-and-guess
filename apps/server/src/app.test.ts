@@ -2,7 +2,11 @@ import { deflateSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 
-import { PROTOCOL_VERSION } from "@draw-guess/protocol";
+import {
+  APPLICATION_VERSION,
+  ConnectionInfoSchema,
+  PROTOCOL_VERSION
+} from "@draw-guess/protocol";
 
 import { createApp } from "./app.js";
 import type { ServerConfig } from "./config.js";
@@ -11,6 +15,7 @@ const TEST_CONFIG: ServerConfig = {
   host: "127.0.0.1",
   port: 3000,
   allowedOrigins: new Set(["http://localhost:5173"]),
+  trustedProxyAddresses: new Set(),
   cookieSecure: false,
   roomIdleTtlMs: 60_000,
   reconnectGraceMs: 1_000,
@@ -86,6 +91,80 @@ function transparentAvatarPng(variant = 1): Uint8Array {
 }
 
 describe("HTTP room integration", () => {
+  it("exposes fixed, non-cacheable connection metadata without room state", async () => {
+    const { app } = await createApp({
+      config: TEST_CONFIG,
+      serveStatic: false,
+      startCleanup: false,
+      serverInstanceId: "s".repeat(43)
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/connection-info"
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/json");
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(ConnectionInfoSchema.parse(response.json())).toEqual({
+      service: "draw-guess",
+      appVersion: APPLICATION_VERSION,
+      protocolVersion: PROTOCOL_VERSION,
+      serverInstanceId: "s".repeat(43),
+      now: expect.any(Number),
+      websocketPath: "/ws",
+      capabilities: { browser: true, desktop: true }
+    });
+    expect(response.body).not.toMatch(
+      /roomCode|password|player|ffmpeg|token|127\.0\.0\.1/iu
+    );
+    expect(
+      (await app.inject({ method: "GET", url: "/api/connection-info" })).json<{
+        serverInstanceId: string;
+      }>().serverInstanceId
+    ).toBe("s".repeat(43));
+    await app.close();
+  });
+
+  it("sets Secure cookies only for an explicitly allowed HTTPS origin through a trusted proxy", async () => {
+    const config: ServerConfig = {
+      ...TEST_CONFIG,
+      allowedOrigins: new Set(["https://public.example"]),
+      trustedProxyAddresses: new Set(["127.0.0.1"])
+    };
+    const { app } = await createApp({
+      config,
+      serveStatic: false,
+      startCleanup: false
+    });
+    const trusted = await app.inject({
+      method: "POST",
+      url: "/api/rooms",
+      remoteAddress: "127.0.0.1",
+      headers: {
+        host: "127.0.0.1:3000",
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "public.example"
+      },
+      payload: { nickname: "代理房主", password: "secret" }
+    });
+    expect(trusted.statusCode).toBe(201);
+    expect(trusted.headers["set-cookie"]).toContain("Secure");
+
+    const untrusted = await app.inject({
+      method: "POST",
+      url: "/api/rooms",
+      remoteAddress: "10.0.0.8",
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "public.example"
+      },
+      payload: { nickname: "远程伪造", password: "secret" }
+    });
+    expect(untrusted.statusCode).toBe(201);
+    expect(untrusted.headers["set-cookie"]).not.toContain("Secure");
+    await app.close();
+  });
+
   it("creates, joins, resumes, and protects public snapshots with HttpOnly sessions", async () => {
     const { app, service } = await createApp({
       config: TEST_CONFIG,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ConnectionTestArgsSchema,
   GameEventSchema,
   SettingsPatchSchema,
   StartServerArgsSchema,
@@ -15,9 +16,34 @@ describe("desktop IPC schemas", () => {
         unexpectedPrivilege: true
       }).success
     ).toBe(false);
-    expect(StartServerArgsSchema.safeParse({ port: 0, allowLan: true }).success).toBe(
-      false
-    );
+    expect(
+      StartServerArgsSchema.safeParse({
+        port: 0,
+        bindMode: "lan",
+        restart: false
+      }).success
+    ).toBe(false);
+    expect(
+      ConnectionTestArgsSchema.safeParse({
+        target: {
+          host: "example.com",
+          port: 443,
+          security: "https"
+        },
+        confirmInsecureHttp: false,
+        arbitraryFetchUrl: "file:///etc/passwd"
+      }).success
+    ).toBe(false);
+    expect(
+      ConnectionTestArgsSchema.safeParse({
+        target: {
+          host: "example.com",
+          port: 0,
+          security: "https"
+        },
+        confirmInsecureHttp: false
+      }).success
+    ).toBe(true);
   });
 
   it("accepts only typed binary values and versioned game events", () => {

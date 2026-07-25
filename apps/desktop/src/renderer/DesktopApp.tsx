@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { DesktopClientMessageSchema } from "@draw-guess/protocol";
 import type { PublicRoomSnapshot } from "@draw-guess/shared-types";
@@ -10,12 +10,24 @@ import type {
   DesktopSettings,
   DiagnosticEntry,
   EmbeddedServerStatus,
-  Invite,
   SettingsPatch,
   ThemeStatus
 } from "../shared/ipc.js";
-import { desktopInvitationText } from "../shared/server-url.js";
+import {
+  connectionHostKind,
+  normalizeConnectionTarget,
+  parseConnectionTargetInput,
+  type ConnectionTarget,
+  type TransportSecurity
+} from "../shared/server-url.js";
 import { CaptureStudio, type CaptureSummary } from "./CaptureStudio.js";
+import {
+  ConnectionTargetEditor,
+  draftFromTarget,
+  targetFromDraft,
+  type ConnectionTargetDraft
+} from "./ConnectionTargetEditor.js";
+import { HostConnectionInformation } from "./HostConnectionInformation.js";
 import { desktopContentServices } from "./desktop-content-store.js";
 
 type Panel = "connection" | "capture" | "settings" | "diagnostics" | null;
@@ -30,7 +42,7 @@ const EMPTY_CAPTURE: CaptureSummary = {
 function serverStateLabel(status: EmbeddedServerStatus): string {
   switch (status.state) {
     case "running":
-      return status.allowLan ? "局域网服务运行中" : "本机服务运行中";
+      return status.bindMode === "lan" ? "局域网服务运行中" : "本机服务运行中";
     case "starting":
       return "服务启动中";
     case "stopping":
@@ -127,27 +139,47 @@ function ConnectionPanel({
   onClose,
   onSettings,
   onStart,
-  onStop
+  onStop,
+  onRefreshNetworks,
+  platform
 }: {
   open: boolean;
   settings: DesktopSettings;
   status: EmbeddedServerStatus;
   onClose: () => void;
   onSettings: (patch: SettingsPatch) => Promise<void>;
-  onStart: (port: number, allowLan: boolean) => Promise<void>;
+  onStart: (
+    port: number,
+    bindMode: DesktopSettings["hostBindMode"],
+    restart: boolean
+  ) => Promise<void>;
   onStop: () => Promise<void>;
+  onRefreshNetworks: () => Promise<void>;
+  platform: Bootstrap["platform"];
 }) {
-  const [serverUrl, setServerUrl] = useState(settings.serverUrl);
   const [port, setPort] = useState(settings.hostPort);
-  const [allowLan, setAllowLan] = useState(settings.allowLan);
+  const [bindMode, setBindMode] = useState(settings.hostBindMode);
+  const [publicHost, setPublicHost] = useState(
+    settings.publicEndpoint?.target.host ?? ""
+  );
+  const [publicPort, setPublicPort] = useState(
+    settings.publicEndpoint?.target.port ?? 443
+  );
+  const [publicSecurity, setPublicSecurity] = useState<TransportSecurity>(
+    settings.publicEndpoint?.target.security ?? "https"
+  );
+  const [publicLabel, setPublicLabel] = useState(settings.publicEndpoint?.label ?? "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    setServerUrl(settings.serverUrl);
     setPort(settings.hostPort);
-    setAllowLan(settings.allowLan);
-  }, [settings.allowLan, settings.hostPort, settings.serverUrl]);
+    setBindMode(settings.hostBindMode);
+    setPublicHost(settings.publicEndpoint?.target.host ?? "");
+    setPublicPort(settings.publicEndpoint?.target.port ?? 443);
+    setPublicSecurity(settings.publicEndpoint?.target.security ?? "https");
+    setPublicLabel(settings.publicEndpoint?.label ?? "");
+  }, [settings.hostBindMode, settings.hostPort, settings.publicEndpoint]);
 
   const run = async (operation: () => Promise<void>) => {
     setBusy(true);
@@ -161,15 +193,42 @@ function ConnectionPanel({
     }
   };
 
-  const applyRemote = (event: FormEvent) => {
+  const savePublicEndpoint = (event: FormEvent) => {
     event.preventDefault();
     void run(async () => {
-      await onSettings({ serverUrl });
-      setMessage("服务器地址已切换，游戏客户端会重新连接。");
+      if (!publicHost) {
+        await onSettings({ publicEndpoint: null });
+        setMessage("已清除公网分享信息；游戏服务没有重启。");
+        return;
+      }
+      const normalized = parseConnectionTargetInput({
+        address: publicHost,
+        port: publicPort,
+        security: publicSecurity
+      });
+      if (connectionHostKind(normalized.host) !== "public") {
+        throw new Error("公网分享信息必须填写 SakuraFrp 提供的公网主机名或公网 IP");
+      }
+      await onSettings({
+        publicEndpoint: {
+          target: {
+            host: normalized.host,
+            port: normalized.port,
+            security: normalized.security
+          },
+          label: publicLabel.trim() || null
+        }
+      });
+      setPublicHost(normalized.host);
+      setPublicPort(normalized.port);
+      setPublicSecurity(normalized.security);
+      setMessage("公网分享信息已保存；本地监听服务无需重启。");
     });
   };
 
-  const addresses = [...status.localUrls, ...status.lanUrls];
+  const runningDraftChanged =
+    status.state === "running" &&
+    (status.requestedPort !== port || status.bindMode !== bindMode);
   return (
     <section
       aria-hidden={!open}
@@ -191,9 +250,11 @@ function ConnectionPanel({
             {serverStateLabel(status)}
           </span>
           <h3>本机 / 局域网房间</h3>
-          <p>默认仅本机可访问。只有明确开启局域网后，服务才监听家庭或工作室网络。</p>
+          <p>
+            启动前选择固定端口和真实绑定模式。运行状态只以主进程返回的监听信息为准。
+          </p>
           <label>
-            端口
+            固定 TCP 端口
             <input
               max={65535}
               min={1}
@@ -202,19 +263,48 @@ function ConnectionPanel({
               value={port}
             />
           </label>
-          <label className="check-row">
-            <input
-              checked={allowLan}
-              onChange={(event) => setAllowLan(event.target.checked)}
-              type="checkbox"
-            />
-            允许同一局域网的玩家加入
+          <label>
+            绑定模式
+            <select
+              onChange={(event) =>
+                setBindMode(event.target.value as DesktopSettings["hostBindMode"])
+              }
+              value={bindMode}
+            >
+              <option value="loopback-only">仅本机 · 127.0.0.1</option>
+              <option value="lan">局域网 / 可做端口转发 · 0.0.0.0</option>
+            </select>
           </label>
-          {status.state === "running" ? (
+          {status.state === "running" && runningDraftChanged ? (
+            <button
+              className="danger-button"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "重启房间服务会结束当前房间并断开全部玩家。确定应用新的端口或绑定模式吗？"
+                  )
+                ) {
+                  void run(() => onStart(port, bindMode, true));
+                }
+              }}
+              type="button"
+            >
+              重启服务以应用更改
+            </button>
+          ) : status.state === "running" ? (
             <button
               className="secondary-button"
               disabled={busy}
-              onClick={() => void run(onStop)}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "停止房间服务会结束当前房间并断开全部玩家。确定停止吗？"
+                  )
+                ) {
+                  void run(onStop);
+                }
+              }}
               type="button"
             >
               停止内置服务
@@ -223,56 +313,170 @@ function ConnectionPanel({
             <button
               className="primary-button"
               disabled={busy}
-              onClick={() => void run(() => onStart(port, allowLan))}
+              onClick={() => void run(() => onStart(port, bindMode, false))}
               type="button"
             >
               启动房间服务
             </button>
           )}
-          {status.usedFallbackPort && (
-            <p className="inline-warning">
-              {status.requestedPort} 已占用，已安全切换到 {status.actualPort}。
-            </p>
-          )}
           {status.error && <p className="inline-error">{status.error}</p>}
-          {addresses.length > 0 && (
-            <div className="address-list">
-              {addresses.map((address) => (
+          {status.state === "running" && (
+            <dl className="network-authority-status">
+              <div>
+                <dt>实际监听</dt>
+                <dd>
+                  {status.boundHost}:{status.actualPort}
+                </dd>
+              </div>
+              <div>
+                <dt>本机入口</dt>
+                <dd>{status.loopbackOrigin}</dd>
+              </div>
+              <div>
+                <dt>服务实例</dt>
+                <dd>{status.serverInstanceId?.slice(0, 12)}…</dd>
+              </div>
+            </dl>
+          )}
+          {status.bindMode === "lan" && (
+            <div className="lan-interface-list">
+              <div>
+                <strong>检测到的 IPv4 网卡</strong>
+                <button onClick={() => void run(onRefreshNetworks)} type="button">
+                  重新枚举
+                </button>
+              </div>
+              {status.lanAddresses.length === 0 ? (
+                <p>服务已监听，但没有发现可分享的局域网 IPv4。</p>
+              ) : (
+                status.lanAddresses.map((address) => (
+                  <div key={address.id}>
+                    <strong>{address.interfaceName}</strong>
+                    <code>{address.cidr ?? address.address}</code>
+                    <span>
+                      {address.kind === "private"
+                        ? "私有网络 · 推荐"
+                        : address.kind === "link-local"
+                          ? "链路本地 · 通常不推荐"
+                          : "虚拟 / VPN / 其它 · 请确认"}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+          {status.bindMode === "lan" && (
+            <div className="firewall-help">
+              <strong>
+                {platform === "win32"
+                  ? "Windows Defender 防火墙仍可能阻止其它设备"
+                  : "系统防火墙和网络策略仍可能阻止其它设备"}
+              </strong>
+              <p>
+                {platform === "win32"
+                  ? "首次询问时建议只允许“专用网络”。应用不会静默提权或创建全局规则。"
+                  : platform === "darwin"
+                    ? "请在 macOS“网络/防火墙”设置中允许本应用接收入站连接；应用无法绕过企业策略。"
+                    : "请在发行版防火墙中允许当前 TCP 端口；访客 Wi-Fi 或企业策略仍可能隔离设备。"}
+              </p>
+              <code>
+                {status.executablePath ?? "应用可执行文件"} · TCP{" "}
+                {status.actualPort ?? port} · {status.boundHost ?? "尚未监听"}
+              </code>
+              {platform === "win32" && (
                 <button
-                  key={address}
-                  onClick={() => void navigator.clipboard.writeText(address)}
-                  title="复制地址"
+                  className="secondary-button"
+                  onClick={() =>
+                    void window.drawGuessDesktop.app.openFirewallSettings()
+                  }
                   type="button"
                 >
-                  <span>{address.includes("127.0.0.1") ? "本机" : "局域网"}</span>
-                  <code>{address}</code>
+                  打开防火墙设置 / 查看帮助
                 </button>
-              ))}
+              )}
             </div>
           )}
         </section>
 
-        <form className="control-card" onSubmit={applyRemote}>
-          <span className="service-state">REMOTE</span>
-          <h3>远程公网服务器</h3>
+        <form className="control-card" onSubmit={savePublicEndpoint}>
+          <span className="service-state">PORT FORWARD</span>
+          <h3>公网分享信息（可选）</h3>
           <p>
-            连接已部署且可访问的中心服务器。公网地址必须使用 HTTPS/WSS；
-            应用不会自动穿透 NAT、修改防火墙或开启端口映射。
+            SakuraFrp 或其它隧道把一个公网入口转发到本机同一个游戏端口。
+            应用只保存展示信息，不下载、登录或管理隧道客户端。
           </p>
           <label>
-            服务器根地址
+            外部主机名或 IP
             <input
-              onChange={(event) => setServerUrl(event.target.value)}
-              placeholder="https://draw.example.com"
-              required
-              type="url"
-              value={serverUrl}
+              onChange={(event) => setPublicHost(event.target.value)}
+              placeholder="example.sakurafrp.example"
+              type="text"
+              value={publicHost}
             />
           </label>
-          <button className="primary-button" disabled={busy} type="submit">
-            使用此服务器
-          </button>
-          <small>本机、私有 IPv4 与 .local 地址允许 HTTP；公开网络强制 HTTPS。</small>
+          <label>
+            外部端口
+            <input
+              max={65_535}
+              min={1}
+              onChange={(event) => setPublicPort(Number(event.target.value))}
+              type="number"
+              value={publicPort}
+            />
+          </label>
+          <label>
+            外部安全性
+            <select
+              onChange={(event) =>
+                setPublicSecurity(event.target.value as TransportSecurity)
+              }
+              value={publicSecurity}
+            >
+              <option value="https">HTTPS / WSS</option>
+              <option value="http">HTTP / WS（原始 TCP，未加密）</option>
+            </select>
+          </label>
+          <label>
+            显示名称（可选）
+            <input
+              maxLength={80}
+              onChange={(event) => setPublicLabel(event.target.value)}
+              placeholder="例如：SakuraFrp 上海节点"
+              value={publicLabel}
+            />
+          </label>
+          {publicSecurity === "http" && (
+            <p className="inline-warning">
+              原始公网 HTTP/WS 没有传输加密；玩家首次连接会被要求明确确认风险。
+            </p>
+          )}
+          <p className="muted">
+            本地映射目标：
+            <code>127.0.0.1:{status.actualPort ?? settings.hostPort}</code>
+            。外部端口与本地端口可以不同。
+          </p>
+          <div className="theme-actions">
+            <button className="primary-button" disabled={busy} type="submit">
+              保存公网分享信息
+            </button>
+            {settings.publicEndpoint && (
+              <button
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => {
+                  setPublicHost("");
+                  void run(async () => {
+                    await onSettings({ publicEndpoint: null });
+                    setMessage("已清除公网分享信息。");
+                  });
+                }}
+                type="button"
+              >
+                清除
+              </button>
+            )}
+          </div>
+          <small>不保存 SakuraFrp token、隧道 ID、路由器凭据、房间密码或会话。</small>
         </form>
         {message && <p className="panel-message">{message}</p>}
       </div>
@@ -880,8 +1084,13 @@ export function DesktopApp() {
   const [snapshot, setSnapshot] = useState<PublicRoomSnapshot | null>(null);
   const [capture, setCapture] = useState<CaptureSummary>(EMPTY_CAPTURE);
   const [panel, setPanel] = useState<Panel>(null);
-  const [invite, setInvite] = useState<Invite | null>(null);
+  const [homeEntryMode, setHomeEntryMode] = useState<"create" | "join">("create");
+  const [joinTarget, setJoinTarget] = useState<ConnectionTargetDraft>(
+    draftFromTarget({ host: "127.0.0.1", port: 3000, security: "http" })
+  );
   const [fatalError, setFatalError] = useState<string | null>(null);
+  const joinTargetRef = useRef(joinTarget);
+  joinTargetRef.current = joinTarget;
 
   useEffect(() => {
     let disposed = false;
@@ -894,28 +1103,16 @@ export function DesktopApp() {
           setServerStatus(result.server);
           setPermission(result.permission);
           setTheme(result.theme);
+          setJoinTarget(draftFromTarget(result.settings.currentClientTarget));
         }
       })
       .catch((error: unknown) => {
         setFatalError(error instanceof Error ? error.message : "桌面应用初始化失败");
       });
     const unsubscribeServer = window.drawGuessDesktop.server.onStatus(setServerStatus);
-    const unsubscribeInvite = window.drawGuessDesktop.app.onInvite((nextInvite) => {
-      void window.drawGuessDesktop.settings
-        .update({ serverUrl: nextInvite.serverUrl })
-        .then((nextSettings) => {
-          setSettings(nextSettings);
-          setInvite(nextInvite);
-          setPanel(null);
-        })
-        .catch((error: unknown) =>
-          setFatalError(error instanceof Error ? error.message : "邀请链接无效")
-        );
-    });
     return () => {
       disposed = true;
       unsubscribeServer();
-      unsubscribeInvite();
     };
   }, []);
 
@@ -923,22 +1120,46 @@ export function DesktopApp() {
     if (!settings) {
       return null;
     }
-    const serverUrl = settings.serverUrl;
+    const target = settings.currentClientTarget;
     return {
-      resume: () => window.drawGuessDesktop.game.resume(serverUrl),
+      resume: () => window.drawGuessDesktop.game.resume(target),
       createRoom: (nickname, password) =>
         window.drawGuessDesktop.game.createRoom({
-          serverUrl,
+          target,
+          confirmInsecureHttp: false,
           nickname,
           password
         }),
-      joinRoom: (roomCode, nickname, password) =>
-        window.drawGuessDesktop.game.joinRoom({
-          serverUrl,
+      joinRoom: async (roomCode, nickname, password) => {
+        const draft = joinTargetRef.current;
+        const joinConnectionTarget = targetFromDraft(draft);
+        let confirmInsecureHttp = draft.confirmInsecureHttp;
+        if (
+          joinConnectionTarget.security === "http" &&
+          connectionHostKind(joinConnectionTarget.host) === "public" &&
+          !confirmInsecureHttp
+        ) {
+          confirmInsecureHttp = window.confirm(
+            "这是公网 HTTP/WS 明文连接。房间密码、聊天、图片和会话可能被链路上的第三方读取或篡改。\n\n只在你信任该入口并理解风险时继续。"
+          );
+          if (!confirmInsecureHttp) {
+            throw new Error("未确认公网 HTTP/WS 风险，未连接服务器");
+          }
+          const confirmedDraft = { ...draft, confirmInsecureHttp: true };
+          joinTargetRef.current = confirmedDraft;
+          setJoinTarget(confirmedDraft);
+        }
+        const result = await window.drawGuessDesktop.game.joinRoom({
+          target: joinConnectionTarget,
+          confirmInsecureHttp,
           roomCode,
           nickname,
           password
-        }),
+        });
+        const refreshed = await window.drawGuessDesktop.bootstrap();
+        setSettings(refreshed.settings);
+        return result;
+      },
       send: async (message) => {
         await window.drawGuessDesktop.game.send(
           DesktopClientMessageSchema.parse(message)
@@ -962,14 +1183,20 @@ export function DesktopApp() {
       onEvent: (listener) =>
         window.drawGuessDesktop.game.onEvent((event) => listener(event))
     };
-  }, [settings?.serverUrl]);
+  }, [
+    settings?.currentClientTarget.host,
+    settings?.currentClientTarget.port,
+    settings?.currentClientTarget.security
+  ]);
 
   const hostControls = useMemo(() => {
     if (
       !settings ||
       !serverStatus ||
       serverStatus.state !== "running" ||
-      !serverStatus.localUrls.includes(settings.serverUrl)
+      !serverStatus.loopbackOrigin ||
+      normalizeConnectionTarget(settings.currentClientTarget).origin !==
+        serverStatus.loopbackOrigin
     ) {
       return undefined;
     }
@@ -992,10 +1219,15 @@ export function DesktopApp() {
     setSettings(next);
   };
 
-  const startServer = async (port: number, allowLan: boolean) => {
+  const startServer = async (
+    port: number,
+    bindMode: DesktopSettings["hostBindMode"],
+    restart: boolean
+  ) => {
     const status = await window.drawGuessDesktop.server.start({
       port,
-      allowLan
+      bindMode,
+      restart
     });
     setServerStatus(status);
     const refreshed = await window.drawGuessDesktop.bootstrap();
@@ -1015,9 +1247,10 @@ export function DesktopApp() {
       return;
     }
     if (startLocal) {
-      await startServer(settings.hostPort, false);
+      setHomeEntryMode("create");
+      await startServer(settings.hostPort, "loopback-only", false);
     } else {
-      setPanel("connection");
+      setHomeEntryMode("join");
     }
     await updateSettings({ onboardingComplete: true });
   };
@@ -1095,20 +1328,37 @@ export function DesktopApp() {
         <GameApp
           contentServices={desktopContentServices}
           hostControls={hostControls}
-          initialRoomCode={invite?.roomCode}
-          invitationText={(roomCode) => {
-            const invitationServer =
-              serverStatus.state === "running"
-                ? serverStatus.allowLan
-                  ? (serverStatus.lanUrls[0] ??
-                    serverStatus.localUrls[0] ??
-                    settings.serverUrl)
-                  : (serverStatus.localUrls[0] ?? settings.serverUrl)
-                : settings.serverUrl;
-            return desktopInvitationText(invitationServer, roomCode);
-          }}
-          key={`${settings.serverUrl}|${invite?.roomCode ?? ""}`}
-          lobbyAddon={captureCard}
+          initialEntryMode={homeEntryMode}
+          joinConnectionControl={
+            <ConnectionTargetEditor
+              draft={joinTarget}
+              onChange={setJoinTarget}
+              onDeleteRecent={async (target: ConnectionTarget) => {
+                const origin = normalizeConnectionTarget(target).origin;
+                await updateSettings({
+                  recentConnections: settings.recentConnections.filter(
+                    (recent) =>
+                      normalizeConnectionTarget(recent.target).origin !== origin
+                  )
+                });
+              }}
+              recentConnections={settings.recentConnections}
+            />
+          }
+          key={normalizeConnectionTarget(settings.currentClientTarget).origin}
+          lobbyAddon={
+            <>
+              {captureCard}
+              {hostControls && snapshot && (
+                <HostConnectionInformation
+                  onSettings={updateSettings}
+                  roomCode={snapshot.roomCode}
+                  settings={settings}
+                  status={serverStatus}
+                />
+              )}
+            </>
+          }
           notificationsEnabled={settings.notificationsEnabled}
           onSnapshot={setSnapshot}
           transport={transport}
@@ -1182,9 +1432,13 @@ export function DesktopApp() {
         onSettings={updateSettings}
         onStart={startServer}
         onStop={stopServer}
+        onRefreshNetworks={async () => {
+          setServerStatus(await window.drawGuessDesktop.server.refreshNetworks());
+        }}
         open={panel === "connection"}
         settings={settings}
         status={serverStatus}
+        platform={bootstrap.platform}
       />
       <CaptureStudio
         onClose={() => setPanel(null)}

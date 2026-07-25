@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  ConnectionInfoSchema,
   PublicRoomSnapshotSchema,
   PublicWordPoolSummarySchema,
   ServerJsonMessageSchema
@@ -18,6 +19,13 @@ import type {
   WordPackSelectionSchema,
   WordPackSummarySchema
 } from "@draw-guess/content";
+import {
+  ConnectionTargetSchema,
+  NormalizedConnectionTargetSchema,
+  TransportSecuritySchema,
+  connectionHostKind,
+  connectionTargetFromOrigin
+} from "./server-url.js";
 
 export const IPC_CHANNELS = {
   bootstrap: "desktop:bootstrap",
@@ -30,6 +38,9 @@ export const IPC_CHANNELS = {
   serverStatus: "server:status",
   serverPause: "server:pause",
   serverResume: "server:resume",
+  serverRefreshNetworks: "server:refresh-networks",
+  connectionTest: "connection:test",
+  systemOpenFirewallSettings: "system:open-firewall-settings",
   replayRevalidate: "replay:revalidate",
   replayRetry: "replay:retry",
   replaySaved: "replay:saved",
@@ -58,7 +69,6 @@ export const IPC_CHANNELS = {
   sharingState: "sharing:state",
   sharingStopRequested: "sharing:stop-requested",
   windowHide: "window:hide",
-  inviteReceived: "app:invite-received",
   diagnosticsRead: "diagnostics:read",
   diagnosticsExport: "diagnostics:export",
   themeStatus: "theme:status",
@@ -91,10 +101,61 @@ export const NormalizedCropSchema = z
 
 export const DesktopSettingsSchema = z
   .object({
-    schemaVersion: z.literal(4),
-    serverUrl: z.string().url(),
+    schemaVersion: z.literal(5),
+    currentClientTarget: ConnectionTargetSchema,
     hostPort: z.number().int().min(1).max(65_535),
-    allowLan: z.boolean(),
+    hostBindMode: z.enum(["loopback-only", "lan"]),
+    preferredLanAddressId: z.string().min(1).max(512).nullable(),
+    recentConnections: z
+      .array(
+        z
+          .object({
+            target: ConnectionTargetSchema,
+            label: z.string().trim().min(1).max(80).nullable(),
+            lastConnectedAt: z.number().int().nonnegative()
+          })
+          .strict()
+      )
+      .max(8),
+    publicEndpoint: z
+      .object({
+        target: ConnectionTargetSchema,
+        label: z.string().trim().min(1).max(80).nullable()
+      })
+      .strict()
+      .superRefine((endpoint, context) => {
+        if (connectionHostKind(endpoint.target.host) !== "public") {
+          context.addIssue({
+            code: "custom",
+            path: ["target", "host"],
+            message: "公网分享信息必须使用公网主机名或公网 IP"
+          });
+        }
+      })
+      .nullable(),
+    insecureHttpConfirmations: z
+      .array(z.string().url())
+      .max(20)
+      .superRefine((origins, context) => {
+        origins.forEach((origin, index) => {
+          try {
+            const target = connectionTargetFromOrigin(origin);
+            if (
+              target.origin !== origin ||
+              target.security !== "http" ||
+              connectionHostKind(target.host) !== "public"
+            ) {
+              throw new Error();
+            }
+          } catch {
+            context.addIssue({
+              code: "custom",
+              path: [index],
+              message: "明文确认必须绑定规范化的公网 HTTP origin"
+            });
+          }
+        });
+      }),
     minimizeToTray: z.boolean(),
     launchAtLogin: z.boolean(),
     stopSharingShortcut: z.string().min(1).max(64),
@@ -145,15 +206,31 @@ export const CapturePermissionStatusSchema = z
   })
   .strict();
 
+export const HostBindModeSchema = z.enum(["loopback-only", "lan"]);
+
+export const LanAddressSchema = z
+  .object({
+    id: z.string().min(1).max(512),
+    interfaceName: z.string().min(1).max(256),
+    address: z.string().min(7).max(15),
+    netmask: z.string().min(7).max(15),
+    cidr: z.string().min(1).max(64).nullable(),
+    kind: z.enum(["private", "link-local", "other"]),
+    recommended: z.boolean()
+  })
+  .strict();
+
 export const EmbeddedServerStatusSchema = z
   .object({
     state: z.enum(["stopped", "starting", "running", "stopping", "error"]),
+    bindMode: HostBindModeSchema,
+    boundHost: z.enum(["127.0.0.1", "0.0.0.0"]).nullable(),
     requestedPort: z.number().int().min(1).max(65_535).nullable(),
     actualPort: z.number().int().min(1).max(65_535).nullable(),
-    allowLan: z.boolean(),
-    localUrls: z.array(z.string().url()),
-    lanUrls: z.array(z.string().url()),
-    usedFallbackPort: z.boolean(),
+    serverInstanceId: z.string().min(32).max(160).nullable(),
+    loopbackOrigin: z.string().url().nullable(),
+    lanAddresses: z.array(LanAddressSchema),
+    executablePath: z.string().min(1).max(4_096).nullable(),
     error: z.string().nullable()
   })
   .strict();
@@ -193,13 +270,14 @@ export const DesktopRoomResponseSchema = z
 
 export const ConfigureGameSchema = z
   .object({
-    serverUrl: z.string().url()
+    target: ConnectionTargetSchema
   })
   .strict();
 
 export const CreateRoomArgsSchema = z
   .object({
-    serverUrl: z.string().url(),
+    target: ConnectionTargetSchema,
+    confirmInsecureHttp: z.boolean().default(false),
     nickname: z.string().trim().min(1).max(24),
     password: z.string().min(4).max(128)
   })
@@ -207,7 +285,8 @@ export const CreateRoomArgsSchema = z
 
 export const JoinRoomArgsSchema = z
   .object({
-    serverUrl: z.string().url(),
+    target: ConnectionTargetSchema,
+    confirmInsecureHttp: z.boolean().default(false),
     roomCode: z
       .string()
       .trim()
@@ -221,9 +300,57 @@ export const JoinRoomArgsSchema = z
 export const StartServerArgsSchema = z
   .object({
     port: z.number().int().min(1).max(65_535),
-    allowLan: z.boolean()
+    bindMode: HostBindModeSchema,
+    restart: z.boolean().default(false)
   })
   .strict();
+
+export const ConnectionDiagnosticCodeSchema = z.enum([
+  "success",
+  "invalid-input",
+  "dns-failed",
+  "connection-refused",
+  "timeout",
+  "tls-failed",
+  "wrong-service",
+  "protocol-mismatch",
+  "insecure-confirmation"
+]);
+
+export const ConnectionTestArgsSchema = z
+  .object({
+    target: z
+      .object({
+        host: z.string().min(1).max(512),
+        port: z.number().finite(),
+        security: TransportSecuritySchema
+      })
+      .strict(),
+    confirmInsecureHttp: z.boolean().default(false)
+  })
+  .strict();
+
+export const ConnectionTestResultSchema = z.discriminatedUnion("ok", [
+  z
+    .object({
+      ok: z.literal(true),
+      code: z.literal("success"),
+      message: z.string().min(1).max(512),
+      target: NormalizedConnectionTargetSchema,
+      info: ConnectionInfoSchema,
+      latencyMs: z.number().int().nonnegative()
+    })
+    .strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      code: ConnectionDiagnosticCodeSchema.exclude(["success"]),
+      message: z.string().min(1).max(512),
+      target: NormalizedConnectionTargetSchema.nullable(),
+      latencyMs: z.number().int().nonnegative().nullable()
+    })
+    .strict()
+]);
 
 export const BinaryValueSchema = z.custom<Uint8Array>(
   (value) => value instanceof Uint8Array,
@@ -404,13 +531,6 @@ export const SharingStateSchema = z
   })
   .strict();
 
-export const InviteSchema = z
-  .object({
-    serverUrl: z.string().url(),
-    roomCode: z.string().regex(/^[A-Z0-9]{6}$/)
-  })
-  .strict();
-
 export const DiagnosticEntrySchema = z
   .object({
     timestamp: z.string(),
@@ -434,8 +554,8 @@ export type ThemeStatus = z.infer<typeof ThemeStatusSchema>;
 export type Bootstrap = z.infer<typeof BootstrapSchema>;
 export type GameEvent = z.infer<typeof GameEventSchema>;
 export type SharingState = z.infer<typeof SharingStateSchema>;
-export type Invite = z.infer<typeof InviteSchema>;
 export type DiagnosticEntry = z.infer<typeof DiagnosticEntrySchema>;
+export type ConnectionTestResult = z.infer<typeof ConnectionTestResultSchema>;
 
 export interface DesktopBridge {
   bootstrap(): Promise<Bootstrap>;
@@ -450,7 +570,11 @@ export interface DesktopBridge {
     stop(): Promise<EmbeddedServerStatus>;
     pause(roomCode: string): Promise<void>;
     resume(roomCode: string): Promise<void>;
+    refreshNetworks(): Promise<EmbeddedServerStatus>;
     onStatus(listener: (status: EmbeddedServerStatus) => void): () => void;
+  };
+  connection: {
+    test(args: z.input<typeof ConnectionTestArgsSchema>): Promise<ConnectionTestResult>;
   };
   replay: {
     revalidate(): Promise<z.infer<typeof ReplayHostCapabilitySchema>>;
@@ -460,7 +584,7 @@ export interface DesktopBridge {
     openFolder(roomCode: string): Promise<void>;
   };
   game: {
-    configure(serverUrl: string): Promise<void>;
+    configure(target: z.input<typeof ConnectionTargetSchema>): Promise<void>;
     createRoom(
       args: z.input<typeof CreateRoomArgsSchema>
     ): Promise<z.infer<typeof DesktopRoomResponseSchema>>;
@@ -468,7 +592,7 @@ export interface DesktopBridge {
       args: z.input<typeof JoinRoomArgsSchema>
     ): Promise<z.infer<typeof DesktopRoomResponseSchema>>;
     resume(
-      serverUrl: string
+      target: z.input<typeof ConnectionTargetSchema>
     ): Promise<z.infer<typeof DesktopRoomResponseSchema> | null>;
     send(message: z.input<typeof DesktopClientMessageSchema>): Promise<void>;
     uploadFrame(
@@ -519,7 +643,7 @@ export interface DesktopBridge {
   };
   app: {
     hideToTray(): Promise<void>;
-    onInvite(listener: (invite: Invite) => void): () => void;
+    openFirewallSettings(): Promise<void>;
   };
   diagnostics: {
     read(): Promise<DiagnosticEntry[]>;
