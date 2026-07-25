@@ -9,23 +9,28 @@ body:has(.sharing-overlay) {
 }
 
 .desktop-root {
-  min-height: 100vh;
+  display: grid;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .theme-root {
   position: relative;
   z-index: 0;
-  min-height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
   isolation: isolate;
 }
 
 .desktop-dock {
-  position: fixed;
+  position: relative;
   z-index: 90;
-  right: 1rem;
-  bottom: 1rem;
   display: flex;
+  margin: 0.5rem 1rem 1rem;
   padding: 0.35rem;
+  justify-self: end;
   border: 2px solid var(--line);
   background: rgba(255, 250, 240, 0.96);
   box-shadow: 4px 4px 0 var(--line);
@@ -1255,9 +1260,9 @@ body:has(.sharing-overlay) {
   }
 
   .desktop-dock {
-    right: 0.5rem;
-    bottom: 0.5rem;
-    left: 0.5rem;
+    width: calc(100% - 1rem);
+    margin: 0.5rem;
+    justify-self: stretch;
     justify-content: space-around;
   }
 

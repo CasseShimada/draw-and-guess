@@ -147,6 +147,10 @@ async function runSmokeCheck(
         const bindMode = labels.find((label) =>
           label.textContent?.includes("绑定模式")
         );
+        const dock = document.querySelector(".desktop-dock");
+        const themeRoot = document.querySelector('[data-ui="theme-root"]');
+        const dockBounds = dock?.getBoundingClientRect();
+        const themeBounds = themeRoot?.getBoundingClientRect();
         resolve({
           addressIsText:
             addressLabel?.querySelector("input")?.getAttribute("type") === "text",
@@ -155,6 +159,13 @@ async function runSmokeCheck(
           hasBindModes:
             bindMode?.textContent?.includes("仅本机") === true &&
             bindMode?.textContent?.includes("局域网 / 可做端口转发") === true,
+          dockSeparatedFromGame:
+            Boolean(dockBounds && themeBounds) &&
+            themeBounds.bottom <= dockBounds.top + 0.5,
+          dockInsideViewport:
+            Boolean(dockBounds) &&
+            dockBounds.bottom <= window.innerHeight &&
+            dockBounds.left >= 0,
           noExternalInviteBridge:
             typeof window.drawGuessDesktop.app.onInvite === "undefined"
         });
@@ -280,6 +291,8 @@ async function runSmokeCheck(
           networkUi.hasPort === true &&
           networkUi.hasSecurity === true &&
           networkUi.hasBindModes === true &&
+          networkUi.dockSeparatedFromGame === true &&
+          networkUi.dockInsideViewport === true &&
           networkUi.noExternalInviteBridge === true &&
           themeRuntime.assetLoaded &&
           themeRuntime.marker === "packaged-theme-ready" &&

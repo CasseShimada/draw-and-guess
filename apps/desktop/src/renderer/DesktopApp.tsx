@@ -27,10 +27,14 @@ import {
   targetFromDraft,
   type ConnectionTargetDraft
 } from "./ConnectionTargetEditor.js";
+import {
+  DesktopDock,
+  canManageConnectionPanel,
+  visibleDesktopPanel,
+  type DesktopPanel
+} from "./DesktopDock.js";
 import { HostConnectionInformation } from "./HostConnectionInformation.js";
 import { desktopContentServices } from "./desktop-content-store.js";
-
-type Panel = "connection" | "capture" | "settings" | "diagnostics" | null;
 
 const EMPTY_CAPTURE: CaptureSummary = {
   ready: false,
@@ -1083,7 +1087,7 @@ export function DesktopApp() {
   const [theme, setTheme] = useState<ThemeStatus | null>(null);
   const [snapshot, setSnapshot] = useState<PublicRoomSnapshot | null>(null);
   const [capture, setCapture] = useState<CaptureSummary>(EMPTY_CAPTURE);
-  const [panel, setPanel] = useState<Panel>(null);
+  const [panel, setPanel] = useState<DesktopPanel>(null);
   const [homeEntryMode, setHomeEntryMode] = useState<"create" | "join">("create");
   const [joinTarget, setJoinTarget] = useState<ConnectionTargetDraft>(
     draftFromTarget({ host: "127.0.0.1", port: 3000, security: "http" })
@@ -1222,6 +1226,17 @@ export function DesktopApp() {
       }
     };
   }, [serverStatus, settings]);
+  const connectionManagementAvailable = canManageConnectionPanel(
+    snapshot !== null,
+    hostControls !== undefined
+  );
+  const visiblePanel = visibleDesktopPanel(panel, connectionManagementAvailable);
+
+  useEffect(() => {
+    if (!connectionManagementAvailable) {
+      setPanel((current) => (current === "connection" ? null : current));
+    }
+  }, [connectionManagementAvailable]);
 
   const updateSettings = async (patch: SettingsPatch) => {
     const next = await window.drawGuessDesktop.settings.update(patch);
@@ -1374,60 +1389,18 @@ export function DesktopApp() {
         />
       </div>
 
-      <nav
-        aria-label="桌面应用控制"
-        className="desktop-dock"
-        data-ui="protected-safety"
-      >
-        <button
-          className={panel === "connection" ? "active" : ""}
-          onClick={() =>
-            setPanel((current) => (current === "connection" ? null : "connection"))
-          }
-          type="button"
-        >
-          <span className={`dock-dot dock-dot--${serverStatus.state}`} />
-          联机
-        </button>
-        <button
-          className={panel === "capture" ? "active" : ""}
-          onClick={() =>
-            setPanel((current) => (current === "capture" ? null : "capture"))
-          }
-          type="button"
-        >
-          <span
-            className={`dock-dot ${
-              capture.active
-                ? "dock-dot--live"
-                : capture.ready
-                  ? "dock-dot--running"
-                  : ""
-            }`}
-          />
-          采集
-        </button>
-        <button
-          className={panel === "settings" ? "active" : ""}
-          onClick={() =>
-            setPanel((current) => (current === "settings" ? null : "settings"))
-          }
-          type="button"
-        >
-          设置
-        </button>
-        <button
-          className={panel === "diagnostics" ? "active" : ""}
-          onClick={() =>
-            setPanel((current) => (current === "diagnostics" ? null : "diagnostics"))
-          }
-          type="button"
-        >
-          诊断
-        </button>
-      </nav>
+      <DesktopDock
+        activePanel={visiblePanel}
+        captureActive={capture.active}
+        captureReady={capture.ready}
+        connectionManagementAvailable={connectionManagementAvailable}
+        onToggle={(nextPanel) =>
+          setPanel((current) => (current === nextPanel ? null : nextPanel))
+        }
+        serverState={serverStatus.state}
+      />
 
-      {panel && panel !== "capture" && (
+      {visiblePanel && visiblePanel !== "capture" && (
         <button
           aria-label="关闭桌面控制面板"
           className="desktop-panel-backdrop"
@@ -1436,24 +1409,26 @@ export function DesktopApp() {
           type="button"
         />
       )}
-      <ConnectionPanel
-        onClose={() => setPanel(null)}
-        onSettings={updateSettings}
-        onStart={startServer}
-        onStop={stopServer}
-        onRefreshNetworks={async () => {
-          setServerStatus(await window.drawGuessDesktop.server.refreshNetworks());
-        }}
-        open={panel === "connection"}
-        settings={settings}
-        status={serverStatus}
-        platform={bootstrap.platform}
-      />
+      {connectionManagementAvailable && (
+        <ConnectionPanel
+          onClose={() => setPanel(null)}
+          onSettings={updateSettings}
+          onStart={startServer}
+          onStop={stopServer}
+          onRefreshNetworks={async () => {
+            setServerStatus(await window.drawGuessDesktop.server.refreshNetworks());
+          }}
+          open={visiblePanel === "connection"}
+          settings={settings}
+          status={serverStatus}
+          platform={bootstrap.platform}
+        />
+      )}
       <CaptureStudio
         onClose={() => setPanel(null)}
         onSettingsChange={setSettings}
         onSummary={setCapture}
-        open={panel === "capture"}
+        open={visiblePanel === "capture"}
         settings={settings}
         snapshot={snapshot}
       />
@@ -1466,12 +1441,15 @@ export function DesktopApp() {
         onReset={resetLocalData}
         onSettings={updateSettings}
         onThemeChange={setTheme}
-        open={panel === "settings"}
+        open={visiblePanel === "settings"}
         permission={permission}
         settings={settings}
         theme={theme}
       />
-      <DiagnosticsPanel onClose={() => setPanel(null)} open={panel === "diagnostics"} />
+      <DiagnosticsPanel
+        onClose={() => setPanel(null)}
+        open={visiblePanel === "diagnostics"}
+      />
 
       {!settings.onboardingComplete && (
         <Onboarding bootstrap={bootstrap} onComplete={finishOnboarding} />
