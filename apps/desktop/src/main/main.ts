@@ -210,11 +210,37 @@ async function runSmokeCheck(
         password: "smoke-password"
       });
       const refreshed = await window.drawGuessDesktop.bootstrap();
+      const roomCodeUi = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const banner = document.querySelector('[data-ui="host-room-code"]');
+          const copyButton = banner?.querySelector('[data-ui="copy-room-code"]');
+          const displayedCode = banner?.querySelector("code")?.textContent?.trim();
+          if (
+            displayedCode === response.snapshot.roomCode &&
+            copyButton?.textContent?.trim() === "复制房间码"
+          ) {
+            resolve({ visible: true, displayedCode, hasCopyButton: true });
+            return;
+          }
+          if (Date.now() >= deadline) {
+            resolve({
+              visible: false,
+              displayedCode: displayedCode ?? null,
+              hasCopyButton: Boolean(copyButton)
+            });
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
       return {
         roomCode: response.snapshot.roomCode,
         target: response.target,
         server: response.server,
-        persistedTarget: refreshed.settings.currentClientTarget
+        persistedTarget: refreshed.settings.currentClientTarget,
+        roomCodeUi
       };
     })()`,
     true
@@ -227,6 +253,11 @@ async function runSmokeCheck(
       serverInstanceId?: unknown;
     };
     persistedTarget: { host?: unknown; port?: unknown; security?: unknown };
+    roomCodeUi: {
+      visible?: unknown;
+      displayedCode?: unknown;
+      hasCopyButton?: unknown;
+    };
   };
   writeFileSync(
     resultPath,
@@ -259,6 +290,9 @@ async function runSmokeCheck(
           autoLocalCreate.server.state === "running" &&
           autoLocalCreate.server.actualPort === 32_100 &&
           autoLocalCreate.server.serverInstanceId !== server.serverInstanceId &&
+          autoLocalCreate.roomCodeUi.visible === true &&
+          autoLocalCreate.roomCodeUi.displayedCode === autoLocalCreate.roomCode &&
+          autoLocalCreate.roomCodeUi.hasCopyButton === true &&
           JSON.stringify(autoLocalCreate.persistedTarget) ===
             JSON.stringify(autoLocalCreate.target),
         protocolVersion: PROTOCOL_VERSION,

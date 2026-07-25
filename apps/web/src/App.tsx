@@ -30,6 +30,7 @@ import type {
 } from "@draw-guess/shared-types";
 
 import { AvatarEditor } from "./AvatarEditor.js";
+import { HostRoomCodeBanner } from "./HostRoomCodeBanner.js";
 import { WordPackManager } from "./WordPackManager.js";
 import { createBrowserContentServices } from "./content-store.js";
 import { GAME_MODE_LABELS, ModeRenderer } from "./modes/registry.js";
@@ -506,6 +507,21 @@ export function App({
       toastTimerRef.current = null;
     }, 5_000);
   }, []);
+
+  const copyRoomCode = useCallback(
+    async (roomCode: string) => {
+      try {
+        if (!navigator.clipboard?.writeText) {
+          throw new Error("clipboard unavailable");
+        }
+        await navigator.clipboard.writeText(roomCode);
+        notify(`房间码 ${roomCode} 已复制`);
+      } catch {
+        notify(`无法自动复制，请手动记下房间码 ${roomCode}`);
+      }
+    },
+    [notify]
+  );
 
   useEffect(
     () => () => {
@@ -1439,7 +1455,7 @@ export function App({
           </span>
           <span>
             <strong>画猜现场</strong>
-            <small>{snapshot.roomCode}</small>
+            <small>房间码 {snapshot.roomCode}</small>
           </span>
         </div>
         <div className="topbar__status">
@@ -1552,6 +1568,12 @@ export function App({
         </div>
       )}
       <PassControls send={send} snapshot={snapshot} />
+      {isLobby && isLogicalHost && (
+        <HostRoomCodeBanner
+          onCopy={() => void copyRoomCode(snapshot.roomCode)}
+          roomCode={snapshot.roomCode}
+        />
+      )}
       {isLobby && isLogicalHost && (
         <section
           aria-label="选择游戏模式"

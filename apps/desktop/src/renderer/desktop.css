@@ -564,6 +564,47 @@ body:has(.sharing-overlay) {
   font-weight: 900;
 }
 
+.host-network-room-code {
+  display: grid;
+  padding: 0.85rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  border: 2px solid var(--line);
+  background: var(--yellow);
+  box-shadow: 3px 3px 0 var(--line);
+  gap: 0.65rem;
+}
+
+.host-network-room-code > span {
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.host-network-room-code code {
+  padding: 0.3rem 0.5rem 0.3rem 0.65rem;
+  border: 2px solid var(--line);
+  background: white;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-align: center;
+}
+
+.host-network-room-code button {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  background: white;
+  cursor: copy;
+  font-weight: 900;
+}
+
+.host-network-room-code p {
+  margin: 0;
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .host-connection-information select {
   width: 100%;
   padding: 0.7rem;

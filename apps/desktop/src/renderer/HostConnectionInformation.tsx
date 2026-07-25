@@ -95,6 +95,19 @@ export function HostConnectionInformation({
         <span className="step-pill">实际主机</span>
       </div>
 
+      <div className="host-network-room-code" data-ui="host-network-room-code">
+        <span>六位房间码</span>
+        <code>{roomCode}</code>
+        <button
+          aria-label={`复制房间码 ${roomCode}`}
+          onClick={() => void navigator.clipboard.writeText(roomCode)}
+          type="button"
+        >
+          复制房间码
+        </button>
+        <p>玩家加入时需要输入此房间码和房间密码。</p>
+      </div>
+
       <div className="connection-listen-diagnostic">
         <strong>本机客户端</strong>
         <code>{status.loopbackOrigin ?? "服务未运行"}</code>
