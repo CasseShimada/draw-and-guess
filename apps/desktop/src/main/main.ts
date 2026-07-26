@@ -547,6 +547,9 @@ async function runSmokeCheck(
           );
           if (panel || Date.now() >= deadline) {
             const bounds = panel?.getBoundingClientRect();
+            const contentBounds = document
+              .querySelector(".desktop-control-center__content")
+              ?.getBoundingClientRect();
             const grid = panel?.querySelector(".connection-grid");
             const description = panel?.querySelector(".connection-card > p");
             const input = panel?.querySelector(".connection-card input");
@@ -557,7 +560,11 @@ async function runSmokeCheck(
               visible: Boolean(panel),
               wideLayout:
                 Boolean(bounds) &&
-                bounds.width >= Math.min(950, window.innerWidth - 220),
+                Boolean(contentBounds) &&
+                bounds.width >= 700 &&
+                bounds.width + 1 >= Math.min(950, contentBounds.width),
+              panelWidth: bounds?.width ?? 0,
+              availableContentWidth: contentBounds?.width ?? 0,
               twoReadableColumns: columnTracks.length === 2,
               descriptionFontSize: description
                 ? Number.parseFloat(getComputedStyle(description).fontSize)
@@ -674,6 +681,8 @@ async function runSmokeCheck(
       descriptionFontSize?: unknown;
       inputFontSize?: unknown;
       noBottomFloatingToolbar?: unknown;
+      panelWidth?: unknown;
+      availableContentWidth?: unknown;
     };
     passwordControlUi: {
       visible?: unknown;
