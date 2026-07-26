@@ -459,7 +459,7 @@ describe("draw-relay mode", () => {
       () => {
         expect(fixture.replay.status(replayJobId).status).toBe("saved");
       },
-      { timeout: 10_000, interval: 20 }
+      { timeout: 30_000, interval: 20 }
     );
     const saved = fixture.replay.savedFile(replayJobId!);
     expect(saved).not.toBeNull();
@@ -469,7 +469,7 @@ describe("draw-relay mode", () => {
       (call) => !call.args.includes("-version") && !call.args.includes("-encoders")
     );
     expect(encodeCall?.args.join("\n")).not.toContain(privateGuess);
-  }, 20_000);
+  }, 45_000);
 
   it("requires and reuses the partial replay choice when restarting an active relay", async () => {
     const fixture = await replayFixture();

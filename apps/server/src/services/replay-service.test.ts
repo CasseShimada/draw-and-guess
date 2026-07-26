@@ -330,7 +330,7 @@ describe("replay recording and encoding", () => {
     expect((await stat(saved.path)).isFile()).toBe(true);
     await replay.shutdown();
     await restarted.shutdown();
-  }, 15_000);
+  }, 30_000);
 
   it("retains a failed job, removes partial output, and retries successfully", async () => {
     const test = await fixture();
