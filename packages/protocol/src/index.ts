@@ -12,8 +12,8 @@ import {
   type WordOption
 } from "@draw-guess/shared-types";
 
-export const PROTOCOL_VERSION = 4;
-export const APPLICATION_VERSION = "0.5.6";
+export const PROTOCOL_VERSION = 5;
+export const APPLICATION_VERSION = "0.5.7";
 export const MAX_JSON_MESSAGE_BYTES = 16 * 1024;
 export const MAX_ENCODED_IMAGE_BYTES = 2 * 1024 * 1024;
 export const MAX_FRAME_PACKET_BYTES = MAX_ENCODED_IMAGE_BYTES + 8;
@@ -158,6 +158,14 @@ const GameStartMessageSchema = clientMessage({
   type: z.literal("game:start"),
   commandId: CommandIdSchema
 });
+const PartialReplayChoiceSchema = z.enum(["encode-and-save", "discard"]);
+const GameRestartMessageSchema = clientMessage({
+  type: z.literal("game:restart"),
+  modeSessionId: ModeSessionIdSchema,
+  value: GameModeSettingsSchema,
+  commandId: CommandIdSchema,
+  partialReplay: PartialReplayChoiceSchema.optional()
+});
 const GameReturnLobbyMessageSchema = clientMessage({
   type: z.literal("game:return-lobby"),
   commandId: CommandIdSchema
@@ -167,7 +175,7 @@ const SwitchModeMessageSchema = clientMessage({
   modeSessionId: ModeSessionIdSchema,
   targetMode: z.enum(GAME_MODE_IDS),
   commandId: CommandIdSchema,
-  partialReplay: z.enum(["encode-and-save", "discard"]).optional()
+  partialReplay: PartialReplayChoiceSchema.optional()
 });
 const PassMessageSchema = clientMessage({
   type: z.literal("turn:pass"),
@@ -252,6 +260,7 @@ const CommonClientMessageSchemas = [
   RoomSyncMessageSchema,
   ModeSettingsMessageSchema,
   GameStartMessageSchema,
+  GameRestartMessageSchema,
   GameReturnLobbyMessageSchema,
   SwitchModeMessageSchema,
   PassMessageSchema,

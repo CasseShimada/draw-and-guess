@@ -124,7 +124,7 @@ function testConfig(): ServerConfig {
   };
 }
 
-describe("real HTTP + WebSocket protocol-v4 integration", () => {
+describe("real HTTP + WebSocket protocol-v5 integration", () => {
   const sockets: WebSocket[] = [];
   let activeApp: FastifyInstance | null = null;
 

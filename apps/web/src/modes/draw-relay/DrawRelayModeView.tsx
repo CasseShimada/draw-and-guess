@@ -15,6 +15,7 @@ import {
   useAssetUrl,
   useCountdown
 } from "../common.js";
+import { ModeSettingsFields } from "../ModeSettingsFields.js";
 import type { ModeViewProps } from "../types.js";
 
 export function DrawRelayModeView({
@@ -52,7 +53,10 @@ export function DrawRelayModeView({
     serverOffset
   );
 
-  useEffect(() => setSettings(game.settings), [game.settings]);
+  useEffect(
+    () => setSettings({ ...game.settings }),
+    [game.settings.drawingSeconds, game.settings.guessingSeconds]
+  );
   useEffect(() => {
     let disposed = false;
     setTask(null);
@@ -176,40 +180,16 @@ export function DrawRelayModeView({
           <div className="panel-heading">
             <h2>接龙行动时间</h2>
           </div>
-          <div className="settings-grid">
-            <label>
-              绘画秒数
-              <input
-                disabled={!isHost}
-                max={10_800}
-                min={1}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    drawingSeconds: Number(event.target.value)
-                  }))
-                }
-                type="number"
-                value={settings.drawingSeconds}
-              />
-            </label>
-            <label>
-              猜词秒数
-              <input
-                disabled={!isHost}
-                max={600}
-                min={1}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    guessingSeconds: Number(event.target.value)
-                  }))
-                }
-                type="number"
-                value={settings.guessingSeconds}
-              />
-            </label>
-          </div>
+          <ModeSettingsFields
+            disabled={!isHost}
+            idPrefix="relay-lobby-settings"
+            onChange={(value) => {
+              if (value.mode === "draw-relay") {
+                setSettings(value.settings);
+              }
+            }}
+            value={{ mode: "draw-relay", settings }}
+          />
           {isHost && (
             <div className="settings-actions">
               <button

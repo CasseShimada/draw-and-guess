@@ -84,7 +84,7 @@ function makeService(now: () => number): GameService {
   });
 }
 
-describe("game service protocol-v4 classic flow", () => {
+describe("game service protocol-v5 classic flow", () => {
   let currentTime = 1_000;
   let service: GameService;
 
@@ -722,6 +722,261 @@ describe("game service protocol-v4 classic flow", () => {
     const delivered = decodeViewerFrame(binary.at(-1)!);
     expect(delivered.sequence).toBe(2);
     expect([...delivered.imageBytes]).toEqual([...JPEG_B]);
+  });
+
+  it("atomically restarts a paused Classic game and invalidates every old command, grant, and timer", async () => {
+    const hostJoin = await service.createRoom("房主", "secret", "desktop");
+    const roomCode = hostJoin.snapshot.roomCode;
+    const firstGuestJoin = await service.joinRoom(
+      roomCode,
+      "得分玩家",
+      "secret",
+      "browser"
+    );
+    const secondGuestJoin = await service.joinRoom(
+      roomCode,
+      "旁观玩家",
+      "secret",
+      "browser"
+    );
+    const host = service.resumeSession(hostJoin.sessionToken, "desktop");
+    const firstGuest = service.resumeSession(firstGuestJoin.sessionToken, "browser");
+    const secondGuest = service.resumeSession(secondGuestJoin.sessionToken, "browser");
+    const hostSocket = new FakeSocket();
+    const firstGuestSocket = new FakeSocket();
+    const secondGuestSocket = new FakeSocket();
+    service.connectPlayer(host, hostSocket, "desktop");
+    service.connectPlayer(firstGuest, firstGuestSocket, "browser");
+    service.connectPlayer(secondGuest, secondGuestSocket, "browser");
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "capture:ready",
+      ready: true
+    });
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "mode:settings",
+      value: {
+        mode: "classic",
+        settings: { drawingSeconds: 15, selectionSeconds: 60, rounds: 2 }
+      }
+    });
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:start",
+      commandId: "restart-flow-start"
+    });
+    const options = latestMessage(hostSocket, "classic:word-options");
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "classic:word-select",
+      modeSessionId: host.room.modeSessionId,
+      actorStepId: options.actorStepId,
+      optionId: options.options[0]!.id,
+      commandId: "restart-flow-select"
+    });
+    const selected = latestMessage(hostSocket, "classic:word-selected");
+    await send(service, firstGuest, firstGuestSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "chat:submit",
+      text: selected.answer
+    });
+    await send(service, secondGuest, secondGuestSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "chat:submit",
+      text: "保留这条聊天"
+    });
+    const before = classicState(host.room);
+    expect(before.phase).toBe("DRAWING");
+    expect(before.scores.get(firstGuest.player.id)).toBeGreaterThan(0);
+    const oldModeSessionId = host.room.modeSessionId;
+    const oldActorStepId = before.actorStepId!;
+    const oldCapture = latestMessage(
+      hostSocket,
+      "capture:start",
+      (message) => message.stage === "drawing"
+    );
+    const playerIds = [...host.room.players.keys()];
+    const retainedChatIds = host.room.chat.map((entry) => entry.id);
+    const configuredWordPoolRevision = before.configuredWordPool.summary.revision;
+
+    await expect(
+      send(service, secondGuest, secondGuestSocket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "game:restart",
+        modeSessionId: oldModeSessionId,
+        value: {
+          mode: "classic",
+          settings: { drawingSeconds: 90, selectionSeconds: 60, rounds: 3 }
+        },
+        commandId: "guest-restart-forgery"
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      send(service, host, hostSocket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "mode:settings",
+        value: {
+          mode: "classic",
+          settings: { drawingSeconds: 90, selectionSeconds: 60, rounds: 3 }
+        }
+      })
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    await expect(
+      send(service, host, hostSocket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "game:restart",
+        modeSessionId: oldModeSessionId,
+        value: {
+          mode: "reference-copy",
+          settings: { durationSeconds: 60, votingSeconds: 30 }
+        },
+        commandId: "mismatched-restart-settings"
+      })
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+    await expect(
+      send(service, host, hostSocket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "game:restart",
+        modeSessionId: "stale-mode-session",
+        value: {
+          mode: "classic",
+          settings: { drawingSeconds: 90, selectionSeconds: 60, rounds: 3 }
+        },
+        commandId: "stale-restart"
+      })
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+
+    service.pauseFromEmbeddedHost("local-host-key", roomCode);
+    expect(host.room.runControl.status).toBe("paused");
+    const restart: ClientJsonMessage = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:restart",
+      modeSessionId: oldModeSessionId,
+      value: {
+        mode: "classic",
+        settings: { drawingSeconds: 90, selectionSeconds: 60, rounds: 3 }
+      },
+      commandId: "atomic-classic-restart"
+    };
+    await send(service, host, hostSocket, restart);
+
+    const restarted = classicState(host.room);
+    const restartedModeSessionId = host.room.modeSessionId;
+    expect(restartedModeSessionId).not.toBe(oldModeSessionId);
+    expect(host.room.runControl.status).toBe("running");
+    expect(restarted.phase).toBe("WORD_SELECTION");
+    expect(restarted.settings).toEqual({
+      drawingSeconds: 90,
+      selectionSeconds: 60,
+      rounds: 3
+    });
+    expect(restarted.configuredWordPool.summary.revision).toBe(
+      configuredWordPoolRevision
+    );
+    expect([...host.room.players.keys()]).toEqual(playerIds);
+    expect(host.room.hostId).toBe(host.player.id);
+    expect(
+      retainedChatIds.every((id) => host.room.chat.some((entry) => entry.id === id))
+    ).toBe(true);
+    expect(host.room.chat.at(-1)?.text).toBe("房主应用了新设置，游戏已重新开始");
+    expect([...restarted.scores.values()]).toEqual([0, 0, 0]);
+    expect(restarted.currentRound).toBe(1);
+    expect(restarted.currentTurnId).toBe(1);
+    expect(restarted.actorStepId).not.toBe(oldActorStepId);
+    expect(
+      service.handleDesktopFrame(
+        host,
+        hostSocket,
+        encodeUploadFrame(oldCapture.captureSessionId, JPEG_A)
+      )
+    ).toEqual({ accepted: false, reason: "UPLOAD_NOT_AUTHORIZED" });
+    await expect(
+      send(service, host, hostSocket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "drawing:finish",
+        modeSessionId: oldModeSessionId,
+        actorStepId: oldActorStepId,
+        commandId: "old-actor-after-restart"
+      })
+    ).rejects.toMatchObject({ code: "INVALID_STATE" });
+
+    await send(service, host, hostSocket, restart);
+    expect(host.room.modeSessionId).toBe(restartedModeSessionId);
+    expect(classicState(host.room).actorStepId).toBe(restarted.actorStepId);
+
+    currentTime += 16_000;
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(classicState(host.room).phase).toBe("WORD_SELECTION");
+    expect(host.room.modeScheduler.size).toBe(1);
+  });
+
+  it("keeps applied restart settings in a safe lobby when the new game cannot start", async () => {
+    const hostJoin = await service.createRoom("房主", "secret", "desktop");
+    const roomCode = hostJoin.snapshot.roomCode;
+    const guestJoin = await service.joinRoom(roomCode, "玩家", "secret", "browser");
+    const host = service.resumeSession(hostJoin.sessionToken, "desktop");
+    const guest = service.resumeSession(guestJoin.sessionToken, "browser");
+    const hostSocket = new FakeSocket();
+    service.connectPlayer(host, hostSocket, "desktop");
+    service.connectPlayer(guest, new FakeSocket(), "browser");
+    service.setCaptureReady(roomCode, host.player.id, hostSocket, true);
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:start",
+      commandId: "failed-restart-start"
+    });
+    const options = latestMessage(hostSocket, "classic:word-options");
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "classic:word-select",
+      modeSessionId: host.room.modeSessionId,
+      actorStepId: options.actorStepId,
+      optionId: options.options[0]!.id,
+      commandId: "failed-restart-select"
+    });
+    const oldModeSessionId = host.room.modeSessionId;
+    const oldCapture = latestMessage(hostSocket, "capture:start");
+    service.setCaptureReady(
+      roomCode,
+      host.player.id,
+      hostSocket,
+      false,
+      "source-ended"
+    );
+
+    await expect(
+      send(service, host, hostSocket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "game:restart",
+        modeSessionId: oldModeSessionId,
+        value: {
+          mode: "classic",
+          settings: { drawingSeconds: 120, selectionSeconds: 30, rounds: 4 }
+        },
+        commandId: "restart-without-capture"
+      })
+    ).rejects.toThrow("至少需要一名已确认采集来源的桌面玩家");
+
+    const state = classicState(host.room);
+    expect(host.room.modeSessionId).not.toBe(oldModeSessionId);
+    expect(host.room.runControl).toEqual({ status: "idle" });
+    expect(host.room.modeScheduler.size).toBe(0);
+    expect(state.phase).toBe("LOBBY");
+    expect(state.settings).toEqual({
+      drawingSeconds: 120,
+      selectionSeconds: 30,
+      rounds: 4
+    });
+    expect(host.room.players.size).toBe(2);
+    expect(
+      service.handleDesktopFrame(
+        host,
+        hostSocket,
+        encodeUploadFrame(oldCapture.captureSessionId, JPEG_A)
+      )
+    ).toEqual({ accepted: false, reason: "UPLOAD_NOT_AUTHORIZED" });
+    expect(host.room.chat.at(-1)?.text).toContain("新游戏未能启动");
   });
 
   it("invalidates grants on mode switch and rejects non-host switching", async () => {

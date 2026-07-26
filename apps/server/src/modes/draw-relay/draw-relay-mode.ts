@@ -33,9 +33,11 @@ import type { ReplayService } from "../../services/replay-service.js";
 import type {
   AcceptedModeFrame,
   GameModeController,
+  ModeStartReason,
   ModeContext,
   PassCommand,
-  PassEffect
+  PassEffect,
+  ReturnToLobbyReason
 } from "../game-mode.js";
 import type {
   DrawRelayModeState,
@@ -263,7 +265,10 @@ export class DrawRelayModeController implements GameModeController<"draw-relay">
     return structuredClone(current.configuredWordPool.summary);
   }
 
-  async start(context: ModeContext): Promise<void> {
+  async start(
+    context: ModeContext,
+    _reason: ModeStartReason = "normal"
+  ): Promise<void> {
     const current = state(context);
     if (current.phase !== "LOBBY") {
       throw new GameError(ErrorCode.INVALID_STATE, "绘画接龙已经开始");
@@ -352,21 +357,22 @@ export class DrawRelayModeController implements GameModeController<"draw-relay">
     context.broadcastSnapshots();
   }
 
-  returnToLobby(context: ModeContext): void {
+  returnToLobby(context: ModeContext, reason: ReturnToLobbyReason = "completed"): void {
     const current = state(context);
-    if (current.phase !== "RESULT") {
+    if (reason !== "restart" && current.phase !== "RESULT") {
       throw new GameError(ErrorCode.INVALID_STATE, "接龙尚未结束");
     }
     this.#clearRuntime(context, false);
     current.phase = "LOBBY";
-    current.recordingConfirmedPlayerIds.clear();
+    if (reason === "completed") {
+      current.recordingConfirmedPlayerIds.clear();
+    }
     current.replay = this.#replay.capabilityService.capability.available
       ? { status: "idle" }
       : {
           status: "unavailable",
           message: this.#replay.capabilityService.capability.message
         };
-    context.broadcastSnapshots();
   }
 
   handleCommand(

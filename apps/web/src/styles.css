@@ -1939,7 +1939,7 @@ input {
   }
 }
 
-/* Protocol-v4 mode surfaces */
+/* Protocol-v5 mode surfaces */
 
 .mode-switcher select,
 .mode-chip {
@@ -1955,6 +1955,146 @@ input {
 .mode-chip {
   display: inline-flex;
   align-items: center;
+}
+
+.room-settings-screen {
+  width: min(1500px, 94vw);
+  margin: 0 auto;
+  padding: 2rem 0 5rem;
+}
+
+.room-settings-status {
+  display: grid;
+  padding: 1.3rem 1.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.8fr);
+  align-items: center;
+  border: 2px solid var(--line);
+  background: #dcefea;
+  box-shadow: 5px 5px 0 var(--teal);
+  gap: 1.5rem;
+}
+
+.room-settings-status--paused {
+  background: #fff0b8;
+  box-shadow: 5px 5px 0 var(--yellow-dark);
+}
+
+.room-settings-status h1,
+.room-settings-status p {
+  margin: 0;
+}
+
+.room-settings-status h1 {
+  margin-bottom: 0.5rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 3vw, 2.6rem);
+}
+
+.room-settings-status code {
+  color: var(--coral-dark);
+  font-size: 1rem;
+  letter-spacing: 0.12em;
+}
+
+.room-settings-status > div:last-child {
+  display: grid;
+  color: #3f4946;
+  font-size: 0.82rem;
+  line-height: 1.65;
+  gap: 0.35rem;
+}
+
+.room-settings-layout {
+  display: grid;
+  margin-top: 1.5rem;
+  grid-template-columns: minmax(18rem, 0.72fr) minmax(32rem, 1.28fr);
+  align-items: start;
+  gap: 1.5rem;
+}
+
+.room-settings-layout > .players-panel {
+  grid-row: span 2;
+}
+
+.room-settings-mode-panel {
+  padding-bottom: 1.4rem;
+}
+
+.room-settings-mode-panel > :not(.panel-heading) {
+  margin: 1rem 1.5rem 0;
+}
+
+.room-settings-mode-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.room-settings-mode-list button {
+  display: grid;
+  min-height: 7rem;
+  padding: 0.8rem;
+  align-content: start;
+  border: 2px solid var(--line);
+  background: var(--paper-light);
+  color: var(--ink);
+  gap: 0.4rem;
+  text-align: left;
+}
+
+.room-settings-mode-list button:not(:disabled):hover {
+  background: var(--yellow);
+}
+
+.room-settings-mode-list button.is-selected {
+  border-color: var(--teal);
+  background: #dcefea;
+  opacity: 1;
+}
+
+.room-settings-mode-list span,
+.room-settings-mode-list small {
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.room-settings-mode-list small {
+  color: var(--teal);
+  font-weight: 900;
+}
+
+.room-settings-editor {
+  grid-column: 2;
+}
+
+.room-settings-resource-lock {
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  background: #eee8dc;
+}
+
+.room-settings-resource-lock p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.room-settings-actions {
+  display: flex;
+  padding-top: 1.1rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.7rem;
+}
+
+.room-settings-actions .primary-button {
+  min-width: 13rem;
+}
+
+.room-settings-actions button:disabled,
+.room-settings-mode-list button:disabled {
+  cursor: not-allowed;
 }
 
 .mode-selection-cards {
@@ -2294,6 +2434,17 @@ input {
   .reference-split {
     grid-template-columns: 1fr;
   }
+
+  .room-settings-status,
+  .room-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .room-settings-layout > .players-panel,
+  .room-settings-editor {
+    grid-row: auto;
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 680px) {
@@ -2325,6 +2476,15 @@ input {
   .mode-selection-cards {
     margin-bottom: -1rem;
     grid-template-columns: 1fr;
+  }
+
+  .room-settings-mode-list {
+    grid-template-columns: 1fr;
+  }
+
+  .room-settings-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .relay-chain__guess,

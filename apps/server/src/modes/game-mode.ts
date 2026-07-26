@@ -29,6 +29,9 @@ export interface AcceptedModeFrame {
   audience: "self" | "room";
 }
 
+export type ModeStartReason = "normal" | "restart";
+export type ReturnToLobbyReason = "completed" | "restart";
+
 export interface ModeContext {
   room: Room;
   now(): number;
@@ -72,8 +75,11 @@ export interface GameModeController<Mode extends GameModeId = GameModeId> {
   publicStateFor(context: ModeContext, viewerId: string): PublicModeState;
   passableActors(context: ModeContext, viewerId: string): PublicPassableActor[];
   updateSettings(context: ModeContext, value: unknown): void;
-  start(context: ModeContext): Promise<void> | void;
-  returnToLobby(context: ModeContext): Promise<void> | void;
+  start(context: ModeContext, reason?: ModeStartReason): Promise<void> | void;
+  returnToLobby(
+    context: ModeContext,
+    reason?: ReturnToLobbyReason
+  ): Promise<void> | void;
   handleCommand(
     context: ModeContext,
     playerId: string,

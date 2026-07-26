@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BrowserClientMessageSchema,
+  DesktopClientMessageSchema,
   DrawRelaySettingsSchema,
   GameModeSettingsSchema,
   PROTOCOL_VERSION,
@@ -73,7 +74,72 @@ describe("binary frame protocol", () => {
   });
 });
 
-describe("protocol-v4 mode schemas", () => {
+describe("protocol-v5 mode schemas", () => {
+  it("parses atomic restart commands for browser and desktop clients", () => {
+    expect(PROTOCOL_VERSION).toBe(5);
+    const restart = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:restart",
+      modeSessionId: "mode-session-current",
+      value: {
+        mode: "classic",
+        settings: {
+          drawingSeconds: 75,
+          selectionSeconds: 20,
+          rounds: 3
+        }
+      },
+      commandId: "restart-classic"
+    } as const;
+
+    expect(BrowserClientMessageSchema.parse(restart)).toEqual(restart);
+    expect(DesktopClientMessageSchema.parse(restart)).toEqual(restart);
+    expect(
+      BrowserClientMessageSchema.parse({
+        ...restart,
+        partialReplay: "discard"
+      })
+    ).toMatchObject({ type: "game:restart", partialReplay: "discard" });
+  });
+
+  it("rejects malformed or internally mismatched restart settings", () => {
+    const base = {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:restart",
+      modeSessionId: "mode-session-current",
+      value: {
+        mode: "classic",
+        settings: {
+          drawingSeconds: 75,
+          selectionSeconds: 20,
+          rounds: 3
+        }
+      }
+    } as const;
+
+    expect(BrowserClientMessageSchema.safeParse(base).success).toBe(false);
+    expect(
+      BrowserClientMessageSchema.safeParse({
+        ...base,
+        commandId: "bad-settings",
+        value: {
+          mode: "classic",
+          settings: { durationSeconds: 60, votingSeconds: 20 }
+        }
+      }).success
+    ).toBe(false);
+    expect(
+      DesktopClientMessageSchema.safeParse({
+        ...base,
+        commandId: "out-of-range",
+        value: {
+          mode: "draw-relay",
+          settings: { drawingSeconds: 0, guessingSeconds: 30 }
+        }
+      }).success
+    ).toBe(false);
+  });
+
   it("accepts the exact reference and relay duration boundaries", () => {
     expect(
       ReferenceCopySettingsSchema.parse({

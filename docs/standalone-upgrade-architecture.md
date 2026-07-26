@@ -1,6 +1,6 @@
 # 独立桌面版升级架构
 
-状态：`0.5.1` 实施架构，游戏协议版本仍为 `4`。本文描述当前独立桌面版、三模式框架、实际
+状态：`0.5.7` 实施架构，游戏协议版本为 `5`。本文描述当前独立桌面版、三模式框架、实际
 主机控制和内容安全边界；OBS/Capture Agent 与协议 v1–v3 仅是历史版本。
 
 ## 产品边界
@@ -174,10 +174,11 @@ target、本人/房主权限和暂停规则，再交给 controller：
 命令 ID 在房间内做有界 TTL 去重。连续 Pass 单向推进，每个 actor step 最多一次，
 最后一人/全员 Pass 必须到达确定结果。
 
-## 协议 v4 与内容所有权
+## 协议 v5 与内容所有权
 
-HTTP 与 WebSocket 都要求协议版本 4。不匹配的 upgrade 返回 HTTP 426、当前版本 header
-和结构化错误；旧 v3 payload 不做含糊兼容。
+HTTP 与 WebSocket 都要求协议版本 5。不匹配的 upgrade 返回 HTTP 426、当前版本 header
+和结构化错误；旧 v4 payload 不做含糊兼容。v5 的 `game:restart` 把同模式设置更新、
+旧局清理、`modeSessionId` 轮换和新局启动收敛为一个带 `commandId` 的原子命令。
 
 二进制帧保持四/八字节头宽，但字段从经典专用 `turnId` 提升为通用 session：
 
@@ -294,7 +295,7 @@ ffprobe、下载脚本、构建缓存或旧安装产物。签名/notarization �
 
 ## 验证层次
 
-- 纯单元：v4 schema/二进制、设置迁移、规则、裁切/编码、存储、CSS、IPC、日志。
+- 纯单元：v5 schema/二进制、设置迁移、规则、裁切/编码、存储、CSS、IPC、日志。
 - 模式测试：经典 characterization、临摹并发/匿名投票、接龙私密交接/Pass/超时、
   精确十秒收尾、模式切换与 fake-clock 暂停。
 - 服务集成：桌面能力、浏览器伪造拒绝、426、grant/session 失效、图片认证/ETag/

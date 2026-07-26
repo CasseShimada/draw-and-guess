@@ -13,6 +13,7 @@ import {
   formatDuration,
   useCountdown
 } from "../common.js";
+import { ModeSettingsFields } from "../ModeSettingsFields.js";
 import type { ModeViewProps } from "../types.js";
 
 export function ClassicModeView({
@@ -40,7 +41,10 @@ export function ClassicModeView({
       : null,
     serverOffset
   );
-  useEffect(() => setSettings(game.settings), [game.settings]);
+  useEffect(
+    () => setSettings({ ...game.settings }),
+    [game.settings.drawingSeconds, game.settings.rounds, game.settings.selectionSeconds]
+  );
 
   if (game.phase === "LOBBY") {
     return (
@@ -74,56 +78,16 @@ export function ClassicModeView({
             </div>
             {!isHost && <span className="step-pill">等待房主</span>}
           </div>
-          <div className="settings-grid">
-            <label>
-              绘画时间
-              <input
-                disabled={!isHost}
-                max={180}
-                min={15}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    drawingSeconds: Number(event.target.value)
-                  }))
-                }
-                type="number"
-                value={settings.drawingSeconds}
-              />
-            </label>
-            <label>
-              选词时间
-              <input
-                disabled={!isHost}
-                max={60}
-                min={5}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    selectionSeconds: Number(event.target.value)
-                  }))
-                }
-                type="number"
-                value={settings.selectionSeconds}
-              />
-            </label>
-            <label>
-              轮数
-              <input
-                disabled={!isHost}
-                max={5}
-                min={1}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    rounds: Number(event.target.value)
-                  }))
-                }
-                type="number"
-                value={settings.rounds}
-              />
-            </label>
-          </div>
+          <ModeSettingsFields
+            disabled={!isHost}
+            idPrefix="classic-lobby-settings"
+            onChange={(value) => {
+              if (value.mode === "classic") {
+                setSettings(value.settings);
+              }
+            }}
+            value={{ mode: "classic", settings }}
+          />
           {isHost && (
             <div className="settings-actions">
               <button

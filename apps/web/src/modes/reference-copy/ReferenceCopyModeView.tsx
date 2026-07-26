@@ -13,6 +13,7 @@ import {
   useAssetUrl,
   useCountdown
 } from "../common.js";
+import { ModeSettingsFields } from "../ModeSettingsFields.js";
 import type { ModeViewProps } from "../types.js";
 
 function participantLabel(
@@ -76,7 +77,10 @@ export function ReferenceCopyModeView({
     serverOffset
   );
 
-  useEffect(() => setSettings(game.settings), [game.settings]);
+  useEffect(
+    () => setSettings({ ...game.settings }),
+    [game.settings.durationSeconds, game.settings.votingSeconds]
+  );
   useEffect(() => {
     if (ballot) {
       setBallotIndex(ballot.cursor);
@@ -209,66 +213,16 @@ export function ReferenceCopyModeView({
           <div className="panel-heading">
             <h2>临摹与盲选时长</h2>
           </div>
-          <div className="settings-grid">
-            <div className="duration-setting">
-              <label htmlFor="reference-duration-range">
-                临摹时长
-                <output>{formatDuration(settings.durationSeconds)}</output>
-              </label>
-              <input
-                aria-label="临摹时长滑块"
-                disabled={!isHost}
-                id="reference-duration-range"
-                max={10_800}
-                min={1}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    durationSeconds: event.currentTarget.valueAsNumber
-                  }))
-                }
-                step={1}
-                type="range"
-                value={settings.durationSeconds}
-              />
-              <label htmlFor="reference-duration-exact">精确秒数（1～10800）</label>
-              <input
-                disabled={!isHost}
-                id="reference-duration-exact"
-                inputMode="numeric"
-                max={10_800}
-                min={1}
-                onChange={(event) => {
-                  const value = event.currentTarget.valueAsNumber;
-                  if (Number.isFinite(value)) {
-                    setSettings((current) => ({
-                      ...current,
-                      durationSeconds: Math.min(10_800, Math.max(1, Math.trunc(value)))
-                    }));
-                  }
-                }}
-                step={1}
-                type="number"
-                value={settings.durationSeconds}
-              />
-            </div>
-            <label>
-              盲选秒数
-              <input
-                disabled={!isHost}
-                max={600}
-                min={10}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    votingSeconds: Number(event.target.value)
-                  }))
-                }
-                type="number"
-                value={settings.votingSeconds}
-              />
-            </label>
-          </div>
+          <ModeSettingsFields
+            disabled={!isHost}
+            idPrefix="reference-lobby-settings"
+            onChange={(value) => {
+              if (value.mode === "reference-copy") {
+                setSettings(value.settings);
+              }
+            }}
+            value={{ mode: "reference-copy", settings }}
+          />
           {isHost && (
             <div className="settings-actions">
               <button

@@ -26,6 +26,7 @@ import {
 } from "@draw-guess/protocol";
 import type {
   GameModeId,
+  GameModeSettings,
   PublicRoomSnapshot,
   PublicWordPoolSummary
 } from "@draw-guess/shared-types";
@@ -33,10 +34,29 @@ import type {
 import { AvatarEditor } from "./AvatarEditor.js";
 import { RoomCodeCopyButton } from "./RoomCodeCopyButton.js";
 import { RoomClosureDialog } from "./RoomClosureDialog.js";
+import { RoomSettingsScreen } from "./RoomSettingsScreen.js";
 import { WordPackManager } from "./WordPackManager.js";
 import { createBrowserContentServices } from "./content-store.js";
-import { GAME_MODE_LABELS, ModeRenderer } from "./modes/registry.js";
+import {
+  GAME_MODE_DESCRIPTIONS,
+  GAME_MODE_LABELS,
+  ModeRenderer
+} from "./modes/registry.js";
 import type { ActualHostControls, GameAsset } from "./modes/types.js";
+import {
+  canOpenRoomSettings,
+  createRestartCommand,
+  createRoomSettingsDraft,
+  createSwitchModeCommand,
+  needsPartialReplayChoice,
+  reconcileRoomSettingsDraft,
+  roomSettingsDirty,
+  snapshotInvalidatesRoomSettings,
+  updateRoomSettingsDraft,
+  type PartialReplayChoice,
+  type RoomScreen,
+  type RoomSettingsDraft
+} from "./room-settings-state.js";
 
 type ConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 
@@ -109,6 +129,7 @@ export interface AppProps {
 
 const COMMAND_TYPES = new Set([
   "game:start",
+  "game:restart",
   "game:return-lobby",
   "room:switch-mode",
   "turn:pass",
@@ -137,12 +158,6 @@ const PHASE_LABELS: Record<string, string> = {
   RESULT: "接龙揭晓"
 };
 
-const GAME_MODE_DESCRIPTIONS: Record<GameModeId, string> = {
-  classic: "轮流画、猜词、计分",
-  "reference-copy": "全员同时根据参考图绘制，结束后展示作品",
-  "draw-relay": "按随机顺序看图猜词再绘制，结束后回看完整传递过程"
-};
-
 function commandId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 }
@@ -150,6 +165,27 @@ function commandId(): string {
 function formValue(values: FormData, name: string): string {
   const value = values.get(name);
   return typeof value === "string" ? value : "";
+}
+
+function requestPartialReplayChoice(
+  snapshot: PublicRoomSnapshot
+): PartialReplayChoice | null | undefined {
+  if (!needsPartialReplayChoice(snapshot)) {
+    return undefined;
+  }
+  if (
+    window.confirm(
+      "是否先编码并保存当前接龙的部分回放？\n确定：编码保存；取消：继续选择。"
+    )
+  ) {
+    return "encode-and-save";
+  }
+  if (
+    window.confirm("要丢弃本次部分回放并继续吗？\n取消将保留当前接龙，不执行操作。")
+  ) {
+    return "discard";
+  }
+  return null;
 }
 
 async function responseError(response: Response, fallback: string): Promise<Error> {
@@ -483,6 +519,11 @@ export function App({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [roomClosureNotice, setRoomClosureNotice] = useState<string | null>(null);
+  const [roomScreen, setRoomScreen] = useState<RoomScreen>("game");
+  const [roomSettingsDraft, setRoomSettingsDraft] = useState<RoomSettingsDraft | null>(
+    null
+  );
+  const [restartSubmitting, setRestartSubmitting] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>("offline");
   const [wordOptions, setWordOptions] = useState<WordOption[]>([]);
   const [wordOptionsActorStepId, setWordOptionsActorStepId] = useState<string | null>(
@@ -598,6 +639,9 @@ export function App({
     frameContextRef.current = "";
     avatarSyncKeyRef.current = "";
     setRoomClosureNotice(null);
+    setRoomScreen("game");
+    setRoomSettingsDraft(null);
+    setRestartSubmitting(false);
     setSnapshot(null);
     setConnection("offline");
     setWordOptions([]);
@@ -617,6 +661,13 @@ export function App({
         frameContextRef.current = nextContext;
       }
       const previous = snapshotRef.current;
+      if (snapshotInvalidatesRoomSettings(previous, next)) {
+        setRoomScreen("game");
+        setRoomSettingsDraft(null);
+        setRestartSubmitting(false);
+      } else {
+        setRoomSettingsDraft((draft) => reconcileRoomSettingsDraft(draft, next));
+      }
       if (
         !previous ||
         previous.modeSessionId !== next.modeSessionId ||
@@ -768,6 +819,7 @@ export function App({
           break;
         }
         case "error":
+          setRestartSubmitting(false);
           notify(message.message);
           break;
         case "pong":
@@ -798,8 +850,19 @@ export function App({
   useEffect(() => {
     if (!snapshot) {
       notificationEventIdsRef.current.clear();
+      setRoomScreen("game");
+      setRoomSettingsDraft(null);
+      setRestartSubmitting(false);
     }
   }, [snapshot]);
+
+  useEffect(() => {
+    if (roomScreen === "room-settings" && connection !== "connected") {
+      setRoomScreen("game");
+      setRoomSettingsDraft(null);
+      setRestartSubmitting(false);
+    }
+  }, [connection, roomScreen]);
 
   useEffect(() => {
     const resume = transport
@@ -838,12 +901,18 @@ export function App({
       };
       if (transport) {
         void transport.send(payload).catch((sendError: unknown) => {
+          if (type === "game:restart") {
+            setRestartSubmitting(false);
+          }
           notify(sendError instanceof Error ? sendError.message : "消息发送失败");
         });
         return;
       }
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN) {
+        if (type === "game:restart") {
+          setRestartSubmitting(false);
+        }
         notify("连接尚未恢复，请稍后再试");
         return;
       }
@@ -1379,6 +1448,23 @@ export function App({
     }
   };
 
+  const openWordManager = useCallback(() => {
+    if (
+      roomScreen === "room-settings" &&
+      roomSettingsDraft &&
+      roomSettingsDirty(roomSettingsDraft) &&
+      !window.confirm("尚有未应用的设置修改。放弃修改并打开词库管理吗？")
+    ) {
+      return;
+    }
+    if (roomScreen === "room-settings") {
+      setRoomScreen("game");
+      setRoomSettingsDraft(null);
+      setRestartSubmitting(false);
+    }
+    setWordManagerOpen(true);
+  }, [roomScreen, roomSettingsDraft]);
+
   const modeProps = useMemo(
     () =>
       snapshot
@@ -1397,7 +1483,7 @@ export function App({
             deleteReference,
             loadAsset,
             loadRelayTask,
-            onManageWords: () => setWordManagerOpen(true),
+            onManageWords: openWordManager,
             notify,
             hostControls
           }
@@ -1412,6 +1498,7 @@ export function App({
       loadAsset,
       loadRelayTask,
       notify,
+      openWordManager,
       send,
       serverOffset,
       snapshot,
@@ -1421,6 +1508,73 @@ export function App({
       wordOptionsActorStepId
     ]
   );
+
+  const openRoomSettings = () => {
+    const active = snapshotRef.current;
+    if (!active || !canOpenRoomSettings(active)) {
+      return;
+    }
+    // This is intentionally local UI state: opening the page must not alter
+    // the authoritative mode phase, timers, capture grant, or other clients.
+    setRoomSettingsDraft(createRoomSettingsDraft(active));
+    setRestartSubmitting(false);
+    setRoomScreen("room-settings");
+  };
+
+  const returnToGame = () => {
+    if (
+      roomSettingsDraft &&
+      roomSettingsDirty(roomSettingsDraft) &&
+      !window.confirm("尚有未应用的设置修改。放弃修改并返回当前游戏吗？")
+    ) {
+      return;
+    }
+    setRoomSettingsDraft(null);
+    setRestartSubmitting(false);
+    setRoomScreen("game");
+  };
+
+  const restoreRoomSettings = () => {
+    const active = snapshotRef.current;
+    if (!active) {
+      return;
+    }
+    setRoomSettingsDraft(createRoomSettingsDraft(active));
+  };
+
+  const changeRoomSettings = (value: GameModeSettings) => {
+    setRoomSettingsDraft((draft) =>
+      draft ? updateRoomSettingsDraft(draft, value) : draft
+    );
+  };
+
+  const restartGame = () => {
+    const active = snapshotRef.current;
+    const draft = roomSettingsDraft;
+    if (!active || !draft || restartSubmitting) {
+      return;
+    }
+    if (
+      !window.confirm(
+        "应用设置将立即结束当前游戏，清空本局进度并开始新的一局。房间成员不会被移除。"
+      )
+    ) {
+      return;
+    }
+    const partialReplay = requestPartialReplayChoice(active);
+    if (partialReplay === null) {
+      return;
+    }
+    try {
+      const command = createRestartCommand(active, draft, partialReplay);
+      setRestartSubmitting(true);
+      send(command);
+    } catch (restartError) {
+      notify(
+        restartError instanceof Error ? restartError.message : "房间设置草稿已经失效"
+      );
+    }
+  };
 
   const switchMode = (targetMode: GameModeId) => {
     const active = snapshotRef.current;
@@ -1434,30 +1588,11 @@ export function App({
     ) {
       return;
     }
-    let partialReplay: "encode-and-save" | "discard" | undefined;
-    if (active.game.mode === "draw-relay" && active.game.phase !== "LOBBY") {
-      if (
-        window.confirm(
-          "是否先编码并保存当前接龙的部分回放？\n确定：编码保存；取消：继续选择。"
-        )
-      ) {
-        partialReplay = "encode-and-save";
-      } else if (
-        window.confirm(
-          "要丢弃本次部分回放并继续切换吗？\n取消将保留当前接龙，不执行切换。"
-        )
-      ) {
-        partialReplay = "discard";
-      } else {
-        return;
-      }
+    const partialReplay = requestPartialReplayChoice(active);
+    if (partialReplay === null) {
+      return;
     }
-    send({
-      type: "room:switch-mode",
-      modeSessionId: active.modeSessionId,
-      targetMode,
-      ...(partialReplay ? { partialReplay } : {})
-    });
+    send(createSwitchModeCommand(active, targetMode, partialReplay));
   };
 
   if (wordManagerOpen) {
@@ -1490,13 +1625,18 @@ export function App({
         topbarAddon={topbarAddon}
         onCreate={createRoom}
         onJoin={joinRoom}
-        onManageWords={() => setWordManagerOpen(true)}
+        onManageWords={openWordManager}
       />
     );
   }
 
   const isLogicalHost = snapshot.hostId === snapshot.selfPlayerId;
   const isLobby = snapshot.game.phase === "LOBBY";
+  const showRoomSettings =
+    roomScreen === "room-settings" &&
+    isLogicalHost &&
+    !isLobby &&
+    roomSettingsDraft !== null;
   const resumeDelay =
     snapshot.runControl.status === "running" &&
     snapshot.runControl.captureResumesAt !== null
@@ -1526,12 +1666,12 @@ export function App({
         <div className="topbar__status">
           <button
             className="topbar-content-button"
-            onClick={() => setWordManagerOpen(true)}
+            onClick={openWordManager}
             type="button"
           >
             词库
           </button>
-          {isLogicalHost ? (
+          {isLogicalHost && isLobby ? (
             <label className="mode-switcher">
               <span className="sr-only">切换游戏模式</span>
               <select
@@ -1556,6 +1696,16 @@ export function App({
             </label>
           ) : (
             <span className="mode-chip">{GAME_MODE_LABELS[snapshot.game.mode]}</span>
+          )}
+          {isLogicalHost && !isLobby && (
+            <button
+              className="topbar-content-button"
+              data-ui="room-settings-toggle"
+              onClick={showRoomSettings ? returnToGame : openRoomSettings}
+              type="button"
+            >
+              {showRoomSettings ? "返回游戏" : "返回房间"}
+            </button>
           )}
           {hostControls && snapshot.runControl.status === "running" && (
             <button
@@ -1627,102 +1777,134 @@ export function App({
         </div>
       </header>
 
-      {resumeDelay > 0 && (
-        <div className="resume-banner" role="status">
-          全场已恢复，采集将在 {resumeDelay} 秒后继续。
-        </div>
-      )}
-      <PassControls send={send} snapshot={snapshot} />
-      {isLobby && isLogicalHost && (
-        <section
-          aria-label="选择游戏模式"
-          className="mode-selection-cards"
-          data-ui="mode-selection-cards"
-        >
-          {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => {
-            const selected = mode === snapshot.game.mode;
-            const capabilityBlocked =
-              mode === "draw-relay" && !snapshot.replayCapability.available;
-            return (
-              <button
-                aria-pressed={selected}
-                className={
-                  selected ? "mode-selection-card is-selected" : "mode-selection-card"
-                }
-                disabled={selected || capabilityBlocked}
-                key={mode}
-                onClick={() => switchMode(mode)}
-                type="button"
-              >
-                <strong>{GAME_MODE_LABELS[mode]}</strong>
-                <span>{GAME_MODE_DESCRIPTIONS[mode]}</span>
-                {mode === "draw-relay" && (
-                  <em className={capabilityBlocked ? "is-unavailable" : ""}>
-                    {snapshot.replayCapability.available
-                      ? `主机 FFmpeg 可用 · ${snapshot.replayCapability.encoder}`
-                      : snapshot.replayCapability.message}
-                  </em>
-                )}
-                {selected && <small>当前模式</small>}
-              </button>
-            );
-          })}
-        </section>
-      )}
-      <ModeRenderer {...modeProps} />
-
-      {isLobby && (
-        <section className="mode-lobby-extras">
-          {lobbyAddon}
-          <section className="panel lobby-profile-panel" data-ui="local-profile">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Local profile</p>
-                <h2>房间与头像</h2>
-              </div>
-              <span className="step-pill">可选</span>
+      {showRoomSettings && roomSettingsDraft ? (
+        <RoomSettingsScreen
+          avatarUrls={avatarUrls}
+          busy={restartSubmitting}
+          draft={roomSettingsDraft}
+          onChange={changeRoomSettings}
+          onRestart={restartGame}
+          onRestore={restoreRoomSettings}
+          onReturnToGame={returnToGame}
+          onSwitchMode={switchMode}
+          phaseLabel={PHASE_LABELS[snapshot.game.phase] ?? snapshot.game.phase}
+          snapshot={snapshot}
+        />
+      ) : (
+        <>
+          {resumeDelay > 0 && (
+            <div className="resume-banner" role="status">
+              全场已恢复，采集将在 {resumeDelay} 秒后继续。
             </div>
-            <AvatarEditor
-              avatar={localAvatar}
-              label="当前房间头像"
-              onChange={setLocalAvatar}
-              services={content}
-            />
-          </section>
-        </section>
-      )}
+          )}
+          <PassControls send={send} snapshot={snapshot} />
+          {isLobby && isLogicalHost && (
+            <section
+              aria-label="选择游戏模式"
+              className="mode-selection-cards"
+              data-ui="mode-selection-cards"
+            >
+              {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => {
+                const selected = mode === snapshot.game.mode;
+                const capabilityBlocked =
+                  mode === "draw-relay" && !snapshot.replayCapability.available;
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={
+                      selected
+                        ? "mode-selection-card is-selected"
+                        : "mode-selection-card"
+                    }
+                    disabled={selected || capabilityBlocked}
+                    key={mode}
+                    onClick={() => switchMode(mode)}
+                    type="button"
+                  >
+                    <strong>{GAME_MODE_LABELS[mode]}</strong>
+                    <span>{GAME_MODE_DESCRIPTIONS[mode]}</span>
+                    {mode === "draw-relay" && (
+                      <em className={capabilityBlocked ? "is-unavailable" : ""}>
+                        {snapshot.replayCapability.available
+                          ? `主机 FFmpeg 可用 · ${snapshot.replayCapability.encoder}`
+                          : snapshot.replayCapability.message}
+                      </em>
+                    )}
+                    {selected && <small>当前模式</small>}
+                  </button>
+                );
+              })}
+            </section>
+          )}
+          <ModeRenderer {...modeProps} />
 
-      {snapshot.runControl.status === "paused" && (
-        <div
-          aria-labelledby="pause-title"
-          aria-modal="true"
-          className="pause-overlay"
-          data-ui="pause-overlay"
-          role="dialog"
-        >
-          <section>
-            <p className="eyebrow">Actual server host</p>
-            <h2 id="pause-title">全场已暂停</h2>
-            <p>计时、输入与画面上传均已冻结。保留本地画布，等待服务器主机恢复。</p>
-            {hostControls && (
-              <button
-                className="primary-button"
-                onClick={() =>
-                  void hostControls
-                    .resume(snapshot.roomCode)
-                    .catch((hostError: unknown) =>
-                      notify(
-                        hostError instanceof Error ? hostError.message : "恢复失败"
-                      )
-                    )
-                }
-                type="button"
-              >
-                恢复全场
-              </button>
-            )}
-          </section>
-        </div>
+          {isLobby && (
+            <section className="mode-lobby-extras">
+              {lobbyAddon}
+              <section className="panel lobby-profile-panel" data-ui="local-profile">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">Local profile</p>
+                    <h2>房间与头像</h2>
+                  </div>
+                  <span className="step-pill">可选</span>
+                </div>
+                <AvatarEditor
+                  avatar={localAvatar}
+                  label="当前房间头像"
+                  onChange={setLocalAvatar}
+                  services={content}
+                />
+              </section>
+            </section>
+          )}
+
+          {snapshot.runControl.status === "paused" && (
+            <div
+              aria-labelledby="pause-title"
+              aria-modal="true"
+              className="pause-overlay"
+              data-ui="pause-overlay"
+              role="dialog"
+            >
+              <section>
+                <p className="eyebrow">Actual server host</p>
+                <h2 id="pause-title">全场已暂停</h2>
+                <p>计时、输入与画面上传均已冻结。保留本地画布，等待服务器主机恢复。</p>
+                <div className="settings-actions">
+                  {isLogicalHost && (
+                    <button
+                      className="secondary-button"
+                      onClick={openRoomSettings}
+                      type="button"
+                    >
+                      进入房间设置
+                    </button>
+                  )}
+                  {hostControls && (
+                    <button
+                      className="primary-button"
+                      onClick={() =>
+                        void hostControls
+                          .resume(snapshot.roomCode)
+                          .catch((hostError: unknown) =>
+                            notify(
+                              hostError instanceof Error
+                                ? hostError.message
+                                : "恢复失败"
+                            )
+                          )
+                      }
+                      type="button"
+                    >
+                      恢复全场
+                    </button>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+        </>
       )}
 
       {error && (

@@ -534,6 +534,65 @@ describe("reference-copy mode", () => {
     expect(host.room.chat.at(-1)?.text).toContain("乙");
   });
 
+  it("preserves the configured reference when restarting the same mode", async () => {
+    const hostJoin = await service.createRoom("甲", "secret", "desktop");
+    const roomCode = hostJoin.snapshot.roomCode;
+    const guestJoin = await service.joinRoom(roomCode, "乙", "secret", "desktop");
+    const host = service.resumeSession(hostJoin.sessionToken, "desktop");
+    const guest = service.resumeSession(guestJoin.sessionToken, "desktop");
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+    service.connectPlayer(host, hostSocket, "desktop");
+    service.connectPlayer(guest, guestSocket, "desktop");
+    service.setCaptureReady(roomCode, host.player.id, hostSocket, true);
+    service.setCaptureReady(roomCode, guest.player.id, guestSocket, true);
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "room:switch-mode",
+      modeSessionId: host.room.modeSessionId,
+      targetMode: "reference-copy",
+      commandId: "switch-reference-restart"
+    });
+    const reference = await service.setReference(
+      roomCode,
+      host.player.id,
+      await transparentReference(),
+      "image/png"
+    );
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:start",
+      commandId: "start-reference-restart"
+    });
+    const oldModeSessionId = host.room.modeSessionId;
+    expect(referenceState(host.room).phase).toBe("PREPARING");
+
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:restart",
+      modeSessionId: oldModeSessionId,
+      value: {
+        mode: "reference-copy",
+        settings: { durationSeconds: 900, votingSeconds: 180 }
+      },
+      commandId: "restart-reference"
+    });
+
+    const restarted = referenceState(host.room);
+    expect(host.room.modeSessionId).not.toBe(oldModeSessionId);
+    expect(host.room.runControl.status).toBe("running");
+    expect(restarted.phase).toBe("PREPARING");
+    expect(restarted.reference?.revision).toBe(reference.revision);
+    expect(restarted.settings).toEqual({
+      durationSeconds: 900,
+      votingSeconds: 180
+    });
+    expect(restarted.participants.size).toBe(2);
+    expect(
+      service.referenceAsset(roomCode, guest.player.id, reference.revision).revision
+    ).toBe(reference.revision);
+  });
+
   it("rate-limits reference normalization per host and room", async () => {
     const hostJoin = await service.createRoom("甲", "secret", "desktop");
     const host = service.resumeSession(hostJoin.sessionToken, "desktop");

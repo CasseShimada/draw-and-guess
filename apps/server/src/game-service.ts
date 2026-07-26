@@ -1018,13 +1018,17 @@ export class GameService {
     playerId: string,
     message: ClientJsonMessage
   ): Promise<void> {
-    if (room.modeTransitioning && message.type !== "room:switch-mode") {
+    if (room.modeTransitioning) {
       throw new GameError(ErrorCode.INVALID_STATE, "模式正在切换，请稍后重试", 409);
     }
     const controller = this.#registry.controller(room.modeRuntime.mode);
     const context = this.#context(room);
     if (message.type === "room:switch-mode") {
       await this.#switchMode(room, playerId, message);
+      return;
+    }
+    if (message.type === "game:restart") {
+      await this.#restartGame(room, playerId, message);
       return;
     }
     if (
@@ -1038,6 +1042,13 @@ export class GameService {
         this.#requireHost(room, playerId);
         if (message.value.mode !== room.modeRuntime.mode) {
           throw new GameError(ErrorCode.INVALID_STATE, "设置不属于当前模式", 409);
+        }
+        if (room.modeRuntime.state.phase !== "LOBBY") {
+          throw new GameError(
+            ErrorCode.INVALID_STATE,
+            "游戏进行中不能直接修改设置，请使用应用并重启",
+            409
+          );
         }
         controller.updateSettings(context, message.value.settings);
         this.broadcastSnapshots(room);
@@ -1120,21 +1131,7 @@ export class GameService {
         throw new GameError(ErrorCode.CAPABILITY_UNAVAILABLE, capability.message, 409);
       }
     }
-    if (room.modeTransitioning) {
-      return;
-    }
-    if (
-      room.modeRuntime.mode === "draw-relay" &&
-      room.modeRuntime.state.replayJobId &&
-      room.modeRuntime.state.phase !== "RESULT" &&
-      !message.partialReplay
-    ) {
-      throw new GameError(
-        ErrorCode.INVALID_STATE,
-        "请先选择保存部分回放或丢弃本次录制",
-        409
-      );
-    }
+    this.#validatePartialReplayChoice(room, message.partialReplay);
     room.modeTransitioning = true;
     const oldMode = room.modeRuntime.mode;
     const oldController = this.#registry.controller(oldMode);
@@ -1148,18 +1145,7 @@ export class GameService {
       for (const player of room.players.values()) {
         this.#revokeCapture(room, player.id, "mode-switched", true);
       }
-      if (
-        oldMode === "draw-relay" &&
-        room.modeRuntime.mode === "draw-relay" &&
-        room.modeRuntime.state.replayJobId &&
-        room.modeRuntime.state.phase !== "RESULT" &&
-        message.partialReplay
-      ) {
-        await this.#registry.drawRelay.handlePartialReplay(
-          context,
-          message.partialReplay
-        );
-      }
+      await this.#handlePartialReplay(room, context, message.partialReplay);
       oldController.dispose(context, "mode-switch");
       this.#registry.rememberPreferences(room.modeRuntime, room.modePreferences);
       room.modeScheduler.cancelAll();
@@ -1182,6 +1168,121 @@ export class GameService {
       room.modeTransitioning = false;
     }
     this.broadcastSnapshots(room);
+  }
+
+  async #restartGame(
+    room: Room,
+    playerId: string,
+    message: Extract<ClientJsonMessage, { type: "game:restart" }>
+  ): Promise<void> {
+    this.#requireHost(room, playerId);
+    if (message.modeSessionId !== room.modeSessionId) {
+      throw new GameError(ErrorCode.INVALID_STATE, "游戏重启请求已失效", 409);
+    }
+    if (message.value.mode !== room.modeRuntime.mode) {
+      throw new GameError(ErrorCode.INVALID_STATE, "重启设置不属于当前模式", 409);
+    }
+    this.#validatePartialReplayChoice(room, message.partialReplay);
+
+    room.modeTransitioning = true;
+    const controller = this.#registry.controller(room.modeRuntime.mode);
+    const context = this.#context(room);
+    let sessionRotated = false;
+    try {
+      const at = this.#now();
+      if (room.runControl.status === "running") {
+        room.modeScheduler.pauseAll(at);
+        controller.pause(context, at);
+      }
+      for (const player of room.players.values()) {
+        this.#revokeCapture(room, player.id, "mode-switched", true);
+      }
+      await this.#handlePartialReplay(room, context, message.partialReplay);
+      await controller.returnToLobby(context, "restart");
+      controller.updateSettings(context, message.value.settings);
+      this.#registry.rememberPreferences(room.modeRuntime, room.modePreferences);
+      room.modeScheduler.cancelAll();
+      room.modeSessionId = randomId(16);
+      sessionRotated = true;
+      room.nextLogicalTurnId = 0;
+      room.runControl = {
+        status: "running",
+        resumedAt: null,
+        captureResumesAt: null
+      };
+      try {
+        await controller.start(context, "restart");
+      } catch (error) {
+        room.modeScheduler.cancelAll();
+        await controller.returnToLobby(context, "restart");
+        room.runControl = { status: "idle" };
+        this.#appendChat(room, {
+          kind: "system",
+          playerId: null,
+          nickname: null,
+          text: `房主已应用新设置，但新游戏未能启动：${
+            error instanceof Error ? error.message : "启动失败"
+          }`
+        });
+        throw error;
+      }
+      this.#appendChat(room, {
+        kind: "system",
+        playerId: null,
+        nickname: null,
+        text: "房主应用了新设置，游戏已重新开始"
+      });
+    } catch (error) {
+      room.modeScheduler.cancelAll();
+      if (room.modeRuntime.state.phase !== "LOBBY") {
+        try {
+          await controller.returnToLobby(context, "restart");
+        } catch {
+          // The original command error remains authoritative.
+        }
+      }
+      if (!sessionRotated) {
+        room.modeSessionId = randomId(16);
+      }
+      room.runControl = { status: "idle" };
+      this.broadcastSnapshots(room);
+      throw error;
+    } finally {
+      room.modeTransitioning = false;
+    }
+    this.broadcastSnapshots(room);
+  }
+
+  #validatePartialReplayChoice(
+    room: Room,
+    choice: "encode-and-save" | "discard" | undefined
+  ): void {
+    if (this.#hasPartialReplay(room) && !choice) {
+      throw new GameError(
+        ErrorCode.INVALID_STATE,
+        "请先选择保存部分回放或丢弃本次录制",
+        409
+      );
+    }
+  }
+
+  async #handlePartialReplay(
+    room: Room,
+    context: ModeContext,
+    choice: "encode-and-save" | "discard" | undefined
+  ): Promise<void> {
+    if (!this.#hasPartialReplay(room) || !choice) {
+      return;
+    }
+    await this.#registry.drawRelay.handlePartialReplay(context, choice);
+  }
+
+  #hasPartialReplay(room: Room): boolean {
+    return (
+      room.modeRuntime.mode === "draw-relay" &&
+      Boolean(room.modeRuntime.state.replayJobId) &&
+      room.modeRuntime.state.phase !== "RESULT"
+    );
   }
 
   #context(room: Room): ModeContext {

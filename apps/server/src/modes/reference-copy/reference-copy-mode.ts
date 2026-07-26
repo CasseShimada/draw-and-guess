@@ -28,7 +28,8 @@ import type {
   GameModeController,
   ModeContext,
   PassCommand,
-  PassEffect
+  PassEffect,
+  ReturnToLobbyReason
 } from "../game-mode.js";
 import type {
   ReferenceCopyModeState,
@@ -368,14 +369,13 @@ export class ReferenceCopyModeController implements GameModeController<"referenc
     context.broadcastSnapshots();
   }
 
-  returnToLobby(context: ModeContext): void {
+  returnToLobby(context: ModeContext, reason: ReturnToLobbyReason = "completed"): void {
     const current = state(context);
-    if (current.phase !== "GALLERY") {
+    if (reason !== "restart" && current.phase !== "GALLERY") {
       throw new GameError(ErrorCode.INVALID_STATE, "临摹结果尚未揭晓");
     }
     this.#clearRuntime(context, false);
     current.phase = "LOBBY";
-    context.broadcastSnapshots();
   }
 
   handleCommand(

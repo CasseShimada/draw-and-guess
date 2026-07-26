@@ -13,6 +13,12 @@ export const GAME_MODE_LABELS = {
   "draw-relay": "绘画接龙"
 } as const;
 
+export const GAME_MODE_DESCRIPTIONS: Record<GameModeId, string> = {
+  classic: "轮流画、猜词、计分",
+  "reference-copy": "全员同时根据参考图绘制，结束后展示作品",
+  "draw-relay": "按随机顺序看图猜词再绘制，结束后回看完整传递过程"
+};
+
 type RegisteredModeRenderer = (props: ModeViewProps) => ReactNode;
 
 const MODE_RENDERERS = {

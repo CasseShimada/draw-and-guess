@@ -1,7 +1,7 @@
 # 游戏模式架构
 
-状态：`0.5.1` 当前实施文档，游戏协议版本仍为 `4`。本次网络入口升级未改变三种
-玩法的消息结构或规则。
+状态：`0.5.7` 当前实施文档，游戏协议版本为 `5`。v5 新增同模式原子重启，并明确
+区分房主本地查看的页面与服务器权威游戏阶段。
 
 ## Registry 与房间边界
 
@@ -23,6 +23,24 @@ type RoomModeRuntime =
 词池，接龙在结果前不携带起始词、猜词、未授权画面 revision、manifest 或本地路径。
 需要私密输入的玩家通过绑定 viewer、mode session、actor step 和 revision 的认证
 接口取得任务。
+
+## 房间设置页面不是服务器 LOBBY
+
+Web/Electron 共用的 `App` 维护纯客户端页面状态：
+
+```ts
+type RoomScreen = "game" | "room-settings";
+```
+
+它不进入 `PublicRoomSnapshot`，也不从 `game.phase` 推导。活动游戏中的逻辑房主点击
+“返回房间”时只创建一份以当前 `modeSessionId` 和服务器设置为基线的本地草稿；
+客户端不发送 `game:return-lobby`，服务器 phase、timer、capture grant 和其他玩家
+页面都保持不变。普通快照更新不会覆盖脏草稿。
+
+返回游戏会丢弃草稿且不写服务器。失去逻辑房主身份、连接中断或
+`modeSessionId` 轮换会立即关闭设置页并清除草稿。成功同模式重启后进入新游戏页；
+不同模式切换后则显示目标模式真实 `LOBBY`。游戏进行中的词库、参考图上传与删除
+不出现在可编辑区域，资源调整仍只允许在服务器真实大厅进行。
 
 ## 公共绘制生命周期
 
@@ -50,8 +68,8 @@ JSON 从不携带图片 Base64。
 ## Scheduler、暂停与恢复
 
 每个房间有一个可追踪的 `ModeScheduler`。timer 使用稳定 key，回调执行前检查房间、
-模式、mode session、actor step 和 phase。切换模式、返回大厅、销毁房间和 shutdown
-都会幂等取消全部 timer。
+模式、mode session、actor step 和 phase。切换模式、原子重启、返回大厅、销毁房间
+和 shutdown 都会幂等取消全部 timer。
 
 暂停不是玩法 phase。只有启动内嵌服务的 Electron main 持有不可远程伪造的本地主机
 控制能力：
@@ -65,6 +83,29 @@ frame 随 session 失效。恢复后把 deadline 按暂停墙钟时间平移；�
 执行统一三秒恢复倒计时，再换发新的 capture session。远程玩家和后来转移得到的逻辑
 房主都不能调用暂停或恢复。
 
+## 同模式原子重启
+
+协议 v5 的 `game:restart` 携带当前 `modeSessionId`、完整判别模式设置、
+`commandId` 和可选的接龙部分回放选择。服务端先验证当前逻辑房主、会话、设置模式、
+设置范围和回放选择；该命令在实际主机暂停期间也允许执行。提交顺序为：
+
+1. 冻结 scheduler 并撤销全部 capture grant；
+2. 接龙按与模式切换相同的路径编码保存或丢弃部分回放；
+3. 调用当前 controller 的 restart 型 `returnToLobby`，清除旧回合、帧、投票、
+   结果和异步任务；
+4. 在真实 `LOBBY` 应用新设置并记录当前模式偏好；
+5. 轮换 `modeSessionId`，清零逻辑回合分配并把 `runControl` 置为 running；
+6. 调用同一个 controller `start(..., "restart")` 开始新局；
+7. 广播新快照和系统消息。
+
+房间码、成员、逻辑房主、连接、昵称、头像、密码、聊天、当前模式词库及临摹参考图
+始终保留；分数、轮次、actor step、旧采集 session、旧帧和旧 timer 全部失效。
+`commandId` 仍由房间级有界 TTL 去重，重复请求不会二次启动。
+
+若新局启动条件不满足，旧游戏仍已终止，新设置与内容资源保留，房间稳定停在真实
+`LOBBY + idle`，房主收到具体错误。`mode:settings` 只允许真实 `LOBBY`；活动 phase
+只能编辑本地草稿并提交 `game:restart`。
+
 逻辑房主仍可在任意 phase 切换模式。切换提交点在服务器，顺序为：
 
 1. 冻结当前玩法并撤销全部 grant；
@@ -74,8 +115,8 @@ frame 随 session 失效。恢复后把 deadline 按暂停墙钟时间平移；�
 5. 递增 mode session，创建目标模式 lobby；
 6. 只广播目标模式的新快照。
 
-玩家、密码、头像、聊天、会话和逻辑房主保留；答案、私密猜词、参考图、作品、
-ballot、ready、帧和旧授权全部失效。
+玩家、密码、头像、会话和逻辑房主保留，聊天会重置为目标模式切换系统消息；答案、
+私密猜词、参考图、作品、ballot、ready、帧和旧授权全部失效。
 
 ## Pass coordinator
 
@@ -127,11 +168,13 @@ LOBBY → PREPARING → COUNTDOWN → DRAWING → FINALIZING
 - 最终 MP4 只留在主机本地，不提供 HTTP 下载，不通过局域网或 SakuraFrp 分发。
 
 清理顺序固定为：撤销 grant、停止上传、取消 timer、停止 drain、失效 self-preview
-和通知、释放帧、释放模式资产、dispose controller、广播新状态。
+和通知、释放帧、释放模式运行时、广播新状态。同模式重启保留 configured
+词库/参考图；不同模式切换或房间销毁才释放不属于目标生命周期的模式资产。
 
 ## 0.3 → 0.4 迁移计划
 
-1. 协议和共享类型升级为 v4 判别联合，保留四/八字节图片包头。
+1. 协议和共享类型在 0.4 升级为 v4 判别联合，0.5.7 再升级为带原子重启的 v5，
+   保留四/八字节图片包头。
 2. 引入 scheduler、grant、frame store、drawing finalization 和 Pass coordinator。
 3. 把经典状态迁入 controller，以 characterization tests 锁定选词、计分和轮次。
 4. 接入临摹资产、同步开始、并行绘制、匿名多选点赞与并列获胜。

@@ -33,9 +33,11 @@ import { LatestFrameStore, type AcceptedFrame } from "../../services/frame-store
 import type {
   AcceptedModeFrame,
   GameModeController,
+  ModeStartReason,
   ModeContext,
   PassCommand,
-  PassEffect
+  PassEffect,
+  ReturnToLobbyReason
 } from "../game-mode.js";
 import type { ClassicModeState } from "./classic-state.js";
 
@@ -184,7 +186,7 @@ export class ClassicModeController implements GameModeController<"classic"> {
     return structuredClone(current.configuredWordPool.summary);
   }
 
-  start(context: ModeContext): void {
+  start(context: ModeContext, reason: ModeStartReason = "normal"): void {
     const current = state(context);
     if (current.phase !== "LOBBY") {
       throw new GameError(ErrorCode.INVALID_STATE, "经典模式游戏已经开始");
@@ -226,19 +228,23 @@ export class ClassicModeController implements GameModeController<"classic"> {
     };
     current.wordDeck = createWordDeck(current.gameWordPool.built.words);
     current.drawerIndex = 0;
-    context.room.chat = [];
+    if (reason === "normal") {
+      context.room.chat = [];
+    }
     this.#beginSelection(context, true);
   }
 
-  returnToLobby(context: ModeContext): void {
+  returnToLobby(context: ModeContext, reason: ReturnToLobbyReason = "completed"): void {
     const current = state(context);
-    if (current.phase !== "GAME_RESULT") {
+    if (reason !== "restart" && current.phase !== "GAME_RESULT") {
       throw new GameError(ErrorCode.INVALID_STATE, "经典模式游戏尚未结束");
     }
     this.#resetRoundState(context, current);
     current.phase = "LOBBY";
     current.scores.clear();
-    context.room.chat = [];
+    if (reason === "completed") {
+      context.room.chat = [];
+    }
   }
 
   handleCommand(

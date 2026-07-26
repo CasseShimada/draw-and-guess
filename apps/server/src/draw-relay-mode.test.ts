@@ -471,6 +471,124 @@ describe("draw-relay mode", () => {
     expect(encodeCall?.args.join("\n")).not.toContain(privateGuess);
   }, 20_000);
 
+  it("requires and reuses the partial replay choice when restarting an active relay", async () => {
+    const fixture = await replayFixture();
+    service = new GameService({
+      roomIdleTtlMs: 60_000,
+      reconnectGraceMs: 100,
+      desktopSessionTtlMs: 60_000,
+      turnResultMs: 100,
+      now: () => now,
+      randomIndex: () => 0,
+      replayService: fixture.replay
+    });
+    await service.initialize();
+    const hostJoin = await service.createRoom("甲", "secret", "desktop");
+    const roomCode = hostJoin.snapshot.roomCode;
+    const guestJoin = await service.joinRoom(roomCode, "乙", "secret", "desktop");
+    const host = service.resumeSession(hostJoin.sessionToken, "desktop");
+    const guest = service.resumeSession(guestJoin.sessionToken, "desktop");
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+    const players = [
+      { access: host, socket: hostSocket },
+      { access: guest, socket: guestSocket }
+    ];
+    for (const player of players) {
+      service.connectPlayer(player.access, player.socket, "desktop");
+      await send(service, player.access, player.socket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "capture:ready",
+        ready: true
+      });
+    }
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "room:switch-mode",
+      modeSessionId: host.room.modeSessionId,
+      targetMode: "draw-relay",
+      commandId: "switch-restart-relay"
+    });
+    for (const [index, player] of players.entries()) {
+      await send(service, player.access, player.socket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "relay:recording-consent",
+        modeSessionId: host.room.modeSessionId,
+        confirmed: true,
+        commandId: `restart-relay-consent-${String(index)}`
+      });
+    }
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:start",
+      commandId: "start-restart-relay"
+    });
+    const state = relayState(host.room);
+    const firstJobId = state.replayJobId!;
+    const firstModeSessionId = host.room.modeSessionId;
+
+    await expect(
+      send(service, host, hostSocket, {
+        protocolVersion: PROTOCOL_VERSION,
+        type: "game:restart",
+        modeSessionId: firstModeSessionId,
+        value: {
+          mode: "draw-relay",
+          settings: { drawingSeconds: 45, guessingSeconds: 20 }
+        },
+        commandId: "restart-relay-without-choice"
+      })
+    ).rejects.toThrow("请先选择保存部分回放或丢弃本次录制");
+    expect(host.room.modeSessionId).toBe(firstModeSessionId);
+    expect(state.phase).toBe("PREPARING");
+
+    const discard = vi.spyOn(fixture.replay, "discard");
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:restart",
+      modeSessionId: firstModeSessionId,
+      value: {
+        mode: "draw-relay",
+        settings: { drawingSeconds: 45, guessingSeconds: 20 }
+      },
+      commandId: "restart-relay-discard",
+      partialReplay: "discard"
+    });
+    expect(discard).toHaveBeenCalledWith(firstJobId);
+    discard.mockRestore();
+    expect(fixture.replay.status(firstJobId)).toMatchObject({
+      status: "failed",
+      message: "回放任务不存在"
+    });
+    expect(host.room.modeSessionId).not.toBe(firstModeSessionId);
+    expect(state.phase).toBe("PREPARING");
+    expect(state.settings).toEqual({ drawingSeconds: 45, guessingSeconds: 20 });
+    expect(state.recordingConfirmedPlayerIds.size).toBe(2);
+    const secondJobId = state.replayJobId!;
+
+    const finalize = vi
+      .spyOn(fixture.replay, "finalize")
+      .mockResolvedValue({ path: "partial-replay.mp4", byteLength: 1 });
+    const secondModeSessionId = host.room.modeSessionId;
+    await send(service, host, hostSocket, {
+      protocolVersion: PROTOCOL_VERSION,
+      type: "game:restart",
+      modeSessionId: secondModeSessionId,
+      value: {
+        mode: "draw-relay",
+        settings: { drawingSeconds: 50, guessingSeconds: 25 }
+      },
+      commandId: "restart-relay-encode",
+      partialReplay: "encode-and-save"
+    });
+    expect(finalize).toHaveBeenCalledWith(secondJobId, true);
+    finalize.mockRestore();
+    expect(host.room.modeSessionId).not.toBe(secondModeSessionId);
+    expect(state.phase).toBe("PREPARING");
+    expect(state.settings).toEqual({ drawingSeconds: 50, guessingSeconds: 25 });
+    expect(state.replayJobId).not.toBe(secondJobId);
+  });
+
   it("keeps classic available when the actual host has no FFmpeg capability", async () => {
     service = new GameService({
       roomIdleTtlMs: 60_000,
