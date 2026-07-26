@@ -15,6 +15,7 @@ import {
   CONTENT_LIMITS,
   LocalAvatarSchema,
   LocalAvatarSourceSchema,
+  RememberedNicknameSchema,
   WordPackFileSchema,
   WordPackSelectionSchema,
   parseWordPackBytes,
@@ -57,11 +58,13 @@ const AvatarMetadataSchema = z
 const PreferencesFileSchema = z
   .object({
     schemaVersion: z.literal(1),
-    wordSelection: WordPackSelectionSchema.nullable()
+    wordSelection: WordPackSelectionSchema.nullable(),
+    rememberedNickname: RememberedNicknameSchema.nullable().default(null)
   })
   .strict();
 
 type AvatarMetadata = z.infer<typeof AvatarMetadataSchema>;
+type PreferencesFile = z.infer<typeof PreferencesFileSchema>;
 
 export function migrateAvatarMetadata(input: unknown): AvatarMetadata | null {
   const current = AvatarMetadataSchema.safeParse(input);
@@ -205,6 +208,7 @@ export class ContentStorageService {
   readonly #avatarSourcePath: string;
   readonly #profilePath: string;
   readonly #preferencesPath: string;
+  #preferencesWrites: Promise<void> = Promise.resolve();
 
   constructor(userDataPath: string) {
     this.#root = path.join(userDataPath, "content", "v1");
@@ -389,30 +393,57 @@ export class ContentStorageService {
     ]);
   }
 
-  async getWordSelection(): Promise<WordPackSelection | null> {
+  async #readPreferencesFile(): Promise<PreferencesFile> {
     try {
-      const parsed = PreferencesFileSchema.parse(
+      return PreferencesFileSchema.parse(
         JSON.parse(await readFile(this.#preferencesPath, "utf8")) as unknown
       );
-      return parsed.wordSelection;
     } catch {
-      return null;
+      return {
+        schemaVersion: 1,
+        wordSelection: null,
+        rememberedNickname: null
+      };
     }
   }
 
+  #updatePreferences(
+    update: (preferences: PreferencesFile) => PreferencesFile
+  ): Promise<void> {
+    const operation = this.#preferencesWrites.then(async () => {
+      const next = PreferencesFileSchema.parse(
+        update(await this.#readPreferencesFile())
+      );
+      await atomicWrite(this.#preferencesPath, `${JSON.stringify(next, null, 2)}\n`);
+    });
+    this.#preferencesWrites = operation.catch(() => undefined);
+    return operation;
+  }
+
+  async getWordSelection(): Promise<WordPackSelection | null> {
+    await this.#preferencesWrites;
+    return (await this.#readPreferencesFile()).wordSelection;
+  }
+
   async putWordSelection(selectionInput: WordPackSelection): Promise<void> {
-    const selection = WordPackSelectionSchema.parse(selectionInput);
-    await atomicWrite(
-      this.#preferencesPath,
-      `${JSON.stringify(
-        {
-          schemaVersion: 1,
-          wordSelection: selection
-        },
-        null,
-        2
-      )}\n`
-    );
+    const wordSelection = WordPackSelectionSchema.parse(selectionInput);
+    await this.#updatePreferences((preferences) => ({
+      ...preferences,
+      wordSelection
+    }));
+  }
+
+  async getRememberedNickname(): Promise<string | null> {
+    await this.#preferencesWrites;
+    return (await this.#readPreferencesFile()).rememberedNickname;
+  }
+
+  async putRememberedNickname(nicknameInput: string): Promise<void> {
+    const rememberedNickname = RememberedNicknameSchema.parse(nicknameInput);
+    await this.#updatePreferences((preferences) => ({
+      ...preferences,
+      rememberedNickname
+    }));
   }
 
   async readImportFiles(
@@ -434,6 +465,7 @@ export class ContentStorageService {
   }
 
   async reset(): Promise<void> {
+    await this.#preferencesWrites;
     await Promise.all([
       rm(this.#root, { recursive: true, force: true }),
       this.removeAvatar()

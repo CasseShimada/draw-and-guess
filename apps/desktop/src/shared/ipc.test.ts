@@ -91,6 +91,15 @@ describe("desktop IPC schemas", () => {
         }
       }).success
     ).toBe(false);
+    expect(
+      CreateRoomArgsSchema.safeParse({
+        nickname: "   ",
+        password: "password"
+      })
+    ).toMatchObject({
+      success: true,
+      data: { nickname: "" }
+    });
   });
 
   it("removes Electron's remote-method wrapper from user-facing errors", () => {

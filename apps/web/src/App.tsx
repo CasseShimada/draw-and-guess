@@ -10,6 +10,7 @@ import {
 
 import {
   CONTENT_LIMITS,
+  RememberedNicknameSchema,
   validateNormalizedAvatarPng,
   type LocalAvatar,
   type LocalContentServices,
@@ -62,6 +63,40 @@ type ConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
 
 interface ApiErrorBody {
   error?: { message?: string };
+}
+
+type ClassicWordOptionsMessage = Extract<
+  ServerJsonMessage,
+  { type: "classic:word-options" }
+>;
+type ClassicWordSelectedMessage = Extract<
+  ServerJsonMessage,
+  { type: "classic:word-selected" }
+>;
+
+export function acceptsClassicWordOptions(
+  active: PublicRoomSnapshot | null,
+  message: ClassicWordOptionsMessage
+): boolean {
+  return (
+    active?.modeSessionId === message.modeSessionId &&
+    active.game.mode === "classic" &&
+    active.game.phase === "WORD_SELECTION" &&
+    active.game.currentDrawerId === active.selfPlayerId &&
+    active.game.currentTurnId === message.turnId
+  );
+}
+
+export function acceptsClassicSelectedWord(
+  active: PublicRoomSnapshot | null,
+  message: ClassicWordSelectedMessage
+): boolean {
+  return (
+    active?.modeSessionId === message.modeSessionId &&
+    active.game.mode === "classic" &&
+    active.game.currentDrawerId === active.selfPlayerId &&
+    active.game.selfDrawing?.actorStepId === message.actorStepId
+  );
 }
 
 export type TransportEvent =
@@ -299,13 +334,14 @@ function StatusDot({ state }: { state: ConnectionState }) {
   );
 }
 
-function Home({
+export function Home({
   busy,
   error,
   initialEntryMode,
   joinConnectionControl,
   topbarAddon,
   avatarControl,
+  rememberedNickname,
   onCreate,
   onJoin,
   onManageWords
@@ -316,12 +352,20 @@ function Home({
   joinConnectionControl?: ReactNode;
   topbarAddon?: ReactNode;
   avatarControl: ReactNode;
+  rememberedNickname: string | null;
   onCreate: (nickname: string, password: string) => Promise<void>;
   onJoin: (roomCode: string, nickname: string, password: string) => Promise<void>;
   onManageWords: () => void;
 }) {
   const [entryMode, setEntryMode] = useState<"create" | "join">(initialEntryMode);
+  const [nickname, setNickname] = useState(rememberedNickname ?? "");
+  const nicknameEditedRef = useRef(false);
   useEffect(() => setEntryMode(initialEntryMode), [initialEntryMode]);
+  useEffect(() => {
+    if (!nicknameEditedRef.current) {
+      setNickname(rememberedNickname ?? "");
+    }
+  }, [rememberedNickname]);
 
   const submitCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -417,16 +461,21 @@ function Home({
               <p className="muted">房间与参考图只保存在服务器内存中。</p>
             </div>
             <label>
-              你的昵称（将自动添加 #四位数字）
+              你的昵称（可留空随机；将添加 #四位数字）
               <input
+                autoComplete="nickname"
                 data-critical-kind="input"
                 data-critical-label="创建房间昵称"
                 data-critical-ui="create-nickname-input"
                 data-ui="text-input"
                 name="nickname"
                 maxLength={24}
-                placeholder="例如：小画家"
-                required
+                onChange={(event) => {
+                  nicknameEditedRef.current = true;
+                  setNickname(event.currentTarget.value);
+                }}
+                placeholder="留空将随机生成"
+                value={nickname}
               />
             </label>
             {avatarControl}
@@ -486,16 +535,21 @@ function Home({
               />
             </label>
             <label>
-              你的昵称（将自动添加 #四位数字）
+              你的昵称（可留空随机；将添加 #四位数字）
               <input
+                autoComplete="nickname"
                 data-critical-kind="input"
                 data-critical-label="加入房间昵称"
                 data-critical-ui="join-nickname-input"
                 data-ui="text-input"
                 name="nickname"
                 maxLength={24}
-                placeholder="例如：猜猜看"
-                required
+                onChange={(event) => {
+                  nicknameEditedRef.current = true;
+                  setNickname(event.currentTarget.value);
+                }}
+                placeholder="留空将随机生成"
+                value={nickname}
               />
             </label>
             <label>
@@ -659,6 +713,7 @@ export function App({
   const [wordManagerOpen, setWordManagerOpen] = useState(false);
   const [localAvatar, setLocalAvatar] = useState<LocalAvatar | null>(null);
   const [avatarLoaded, setAvatarLoaded] = useState(false);
+  const [rememberedNickname, setRememberedNickname] = useState<string | null>(null);
   const [avatarUrls, setAvatarUrls] = useState<Map<string, string>>(new Map());
   const [savedReplayAvailable, setSavedReplayAvailable] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<
@@ -739,6 +794,35 @@ export function App({
       disposed = true;
     };
   }, [content, notify]);
+
+  useEffect(() => {
+    let disposed = false;
+    void content.nickname
+      .get()
+      .then((nickname) => {
+        if (!disposed) {
+          setRememberedNickname(nickname);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [content]);
+
+  const rememberManualNickname = useCallback(
+    (nicknameInput: string) => {
+      const parsed = RememberedNicknameSchema.safeParse(nicknameInput);
+      if (!parsed.success) {
+        return;
+      }
+      setRememberedNickname(parsed.data);
+      void content.nickname.put(parsed.data).catch(() => {
+        notify("房间可正常进入，但未能在本机记住昵称");
+      });
+    },
+    [content, notify]
+  );
 
   const clearFrame = useCallback(() => {
     if (frameUrlRef.current) {
@@ -885,11 +969,7 @@ export function App({
           break;
         case "classic:word-options": {
           const active = snapshotRef.current;
-          if (
-            active?.modeSessionId === message.modeSessionId &&
-            active.game.mode === "classic" &&
-            active.game.currentDrawerId === active.selfPlayerId
-          ) {
+          if (acceptsClassicWordOptions(active, message)) {
             setWordOptions(message.options);
             setWordOptionsActorStepId(message.actorStepId);
             setCurrentWord(null);
@@ -898,10 +978,7 @@ export function App({
         }
         case "classic:word-selected": {
           const active = snapshotRef.current;
-          if (
-            active?.modeSessionId === message.modeSessionId &&
-            wordOptionsActorStepId === message.actorStepId
-          ) {
+          if (acceptsClassicSelectedWord(active, message)) {
             setCurrentWord(message.answer);
             setWordOptions([]);
           }
@@ -953,14 +1030,7 @@ export function App({
           break;
       }
     },
-    [
-      applySnapshot,
-      notify,
-      onServerMessage,
-      onSnapshot,
-      showFinalizationNotification,
-      wordOptionsActorStepId
-    ]
+    [applySnapshot, notify, onServerMessage, onSnapshot, showFinalizationNotification]
   );
 
   const finalizing = snapshot?.game.selfDrawing?.status === "finalizing";
@@ -1527,6 +1597,7 @@ export function App({
   ]);
 
   const createRoom = async (nickname: string, password: string) => {
+    rememberManualNickname(nickname);
     setBusy(true);
     setError(null);
     try {
@@ -1549,6 +1620,7 @@ export function App({
     nickname: string,
     password: string
   ) => {
+    rememberManualNickname(nickname);
     setBusy(true);
     setError(null);
     const code = roomCodeInput.trim().toUpperCase();
@@ -1768,6 +1840,7 @@ export function App({
           error={error}
           initialEntryMode={initialEntryMode}
           joinConnectionControl={joinConnectionControl}
+          rememberedNickname={rememberedNickname}
           topbarAddon={topbarAddon}
           onCreate={createRoom}
           onJoin={joinRoom}

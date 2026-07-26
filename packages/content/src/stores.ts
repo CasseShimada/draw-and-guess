@@ -37,10 +37,16 @@ export interface WordPackSelectionStore {
   put(selection: WordPackSelection): Promise<void>;
 }
 
+export interface NicknamePreferenceStore {
+  get(): Promise<string | null>;
+  put(nickname: string): Promise<void>;
+}
+
 export interface LocalContentServices {
   wordPacks: WordPackStore;
   avatar: AvatarStore;
   wordSelection: WordPackSelectionStore;
+  nickname: NicknamePreferenceStore;
   wordFiles: {
     open(): Promise<Array<{ name: string; bytes: Uint8Array }>>;
     save(suggestedName: string, bytes: Uint8Array): Promise<boolean>;

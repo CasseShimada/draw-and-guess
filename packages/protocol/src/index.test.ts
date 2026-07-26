@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   BrowserClientMessageSchema,
+  CreateRoomRequestSchema,
   DesktopClientMessageSchema,
   DrawRelaySettingsSchema,
   GameModeSettingsSchema,
+  JoinRoomRequestSchema,
   PROTOCOL_VERSION,
   ReferenceCopySettingsSchema,
   decodeUploadFrame,
@@ -75,6 +77,29 @@ describe("binary frame protocol", () => {
 });
 
 describe("protocol-v5 mode schemas", () => {
+  it("accepts empty nicknames for server-side random naming", () => {
+    expect(
+      CreateRoomRequestSchema.parse({
+        nickname: "   ",
+        password: "secret"
+      })
+    ).toEqual({
+      nickname: "",
+      password: "secret"
+    });
+    expect(
+      JoinRoomRequestSchema.parse({
+        roomCode: "abc234",
+        nickname: "",
+        password: "secret"
+      })
+    ).toEqual({
+      roomCode: "ABC234",
+      nickname: "",
+      password: "secret"
+    });
+  });
+
   it("parses atomic restart commands for browser and desktop clients", () => {
     expect(PROTOCOL_VERSION).toBe(5);
     const restart = {

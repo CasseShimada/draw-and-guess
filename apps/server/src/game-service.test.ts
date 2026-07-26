@@ -80,6 +80,7 @@ function makeService(now: () => number): GameService {
     desktopSessionTtlMs: 10_000,
     turnResultMs: 100,
     hostControlKey: "local-host-key",
+    nicknameRandomIndex: () => 0,
     now
   });
 }
@@ -146,6 +147,40 @@ describe("game service protocol-v5 classic flow", () => {
     expect(service.resumeSession(hostJoin.sessionToken, "desktop").player.id).toBe(
       hostJoin.snapshot.selfPlayerId
     );
+  });
+
+  it("generates a fresh room-aware nickname whenever the submitted nickname is empty", async () => {
+    const firstRoom = await service.createRoom("", "secret", "desktop");
+    const secondRoom = await service.createRoom("   ", "secret", "desktop");
+    const firstHostName = firstRoom.snapshot.players[0]!.nickname;
+    const secondHostName = secondRoom.snapshot.players[0]!.nickname;
+
+    expect(firstHostName).toMatch(/^[^#]+#\d{4}$/u);
+    expect(secondHostName).toMatch(/^[^#]+#\d{4}$/u);
+    expect(secondHostName).not.toBe(firstHostName);
+
+    const randomGuest = await service.joinRoom(
+      firstRoom.snapshot.roomCode,
+      "",
+      "secret",
+      "desktop"
+    );
+    const randomNames = randomGuest.snapshot.players.map((player) => player.nickname);
+    const randomBases = randomNames.map((nickname) => nickname.replace(/#\d{4}$/u, ""));
+    expect(new Set(randomNames).size).toBe(randomNames.length);
+    expect(new Set(randomBases).size).toBe(randomBases.length);
+
+    const manualGuest = await service.joinRoom(
+      firstRoom.snapshot.roomCode,
+      "  常用玩家  ",
+      "secret",
+      "desktop"
+    );
+    expect(
+      manualGuest.snapshot.players.find(
+        (player) => player.id === manualGuest.snapshot.selfPlayerId
+      )?.nickname
+    ).toMatch(/^常用玩家#\d{4}$/u);
   });
 
   it("lets only the embedded host close a room and gives every player a terminal reason", async () => {

@@ -1,7 +1,7 @@
 {
   "name": "@draw-guess/desktop",
   "productName": "画猜现场",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "支持经典、参考图临摹和绘画接龙的跨平台桌面派对游戏",
   "author": "Draw Guess Contributors",
   "license": "UNLICENSED",

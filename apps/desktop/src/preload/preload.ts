@@ -51,6 +51,7 @@ import {
 } from "@draw-guess/protocol";
 import {
   LocalAvatarSchema,
+  RememberedNicknameSchema,
   ThemeApplyModeSchema,
   WordPackFileSchema,
   WordPackSelectionSchema,
@@ -494,6 +495,23 @@ const bridge: DesktopBridge = {
           undefined
         );
       }
+    },
+    nickname: {
+      get: () =>
+        invoke(
+          IPC_CHANNELS.contentNicknameGet,
+          z.undefined(),
+          RememberedNicknameSchema.nullable(),
+          undefined
+        ),
+      put: async (nickname) => {
+        await invoke(
+          IPC_CHANNELS.contentNicknamePut,
+          RememberedNicknameSchema,
+          z.void(),
+          nickname
+        );
+      }
     }
   }
 };
@@ -512,5 +530,6 @@ Object.freeze(bridge.content.wordPacks);
 Object.freeze(bridge.content.wordSelection);
 Object.freeze(bridge.content.wordFiles);
 Object.freeze(bridge.content.avatar);
+Object.freeze(bridge.content.nickname);
 Object.freeze(bridge.content);
 contextBridge.exposeInMainWorld("drawGuessDesktop", Object.freeze(bridge));

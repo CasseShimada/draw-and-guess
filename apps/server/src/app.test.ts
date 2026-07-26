@@ -228,6 +228,48 @@ describe("HTTP room integration", () => {
     expect(service.rooms.size).toBe(0);
   });
 
+  it("accepts empty browser nicknames and returns distinct generated identities", async () => {
+    const { app } = await createApp({
+      config: TEST_CONFIG,
+      serveStatic: false,
+      startCleanup: false
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/rooms",
+      payload: { nickname: "   ", password: "secret" }
+    });
+    expect(created.statusCode).toBe(201);
+    const createdBody = created.json<{
+      snapshot: {
+        roomCode: string;
+        players: Array<{ nickname: string }>;
+      };
+    }>();
+    const joined = await app.inject({
+      method: "POST",
+      url: `/api/rooms/${createdBody.snapshot.roomCode}/join`,
+      payload: {
+        roomCode: createdBody.snapshot.roomCode,
+        nickname: "",
+        password: "secret"
+      }
+    });
+    expect(joined.statusCode).toBe(200);
+    const names = joined
+      .json<{
+        snapshot: { players: Array<{ nickname: string }> };
+      }>()
+      .snapshot.players.map((player) => player.nickname);
+    expect(names).toHaveLength(2);
+    expect(names.every((nickname) => /^[^#]+#\d{4}$/u.test(nickname))).toBe(true);
+    expect(new Set(names).size).toBe(2);
+    expect(
+      new Set(names.map((nickname) => nickname.replace(/#\d{4}$/u, ""))).size
+    ).toBe(2);
+    await app.close();
+  });
+
   it("issues typed desktop bearer sessions only to non-browser main-process requests", async () => {
     const { app } = await createApp({
       config: TEST_CONFIG,

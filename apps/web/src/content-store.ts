@@ -2,6 +2,7 @@ import {
   BUILTIN_WORD_PACK,
   CONTENT_LIMITS,
   LocalAvatarSchema,
+  RememberedNicknameSchema,
   WordPackFileSchema,
   WordPackSelectionSchema,
   sanitizeExportFilename,
@@ -23,6 +24,7 @@ const PROFILE_STORE = "profile";
 const PREFERENCES_STORE = "preferences";
 const ACTIVE_AVATAR_KEY = "activeAvatar";
 const WORD_SELECTION_KEY = "wordSelection";
+const REMEMBERED_NICKNAME_KEY = "rememberedNickname";
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -268,6 +270,37 @@ class BrowserWordSelectionStore {
   }
 }
 
+class BrowserNicknamePreferenceStore {
+  async get(): Promise<string | null> {
+    const database = await openDatabase();
+    try {
+      const transaction = database.transaction(PREFERENCES_STORE, "readonly");
+      const value = await requestResult<unknown>(
+        transaction
+          .objectStore(PREFERENCES_STORE)
+          .get(REMEMBERED_NICKNAME_KEY) as IDBRequest<unknown>
+      );
+      await transactionDone(transaction);
+      const parsed = RememberedNicknameSchema.safeParse(value);
+      return parsed.success ? parsed.data : null;
+    } finally {
+      database.close();
+    }
+  }
+
+  async put(nicknameInput: string): Promise<void> {
+    const nickname = RememberedNicknameSchema.parse(nicknameInput);
+    const database = await openDatabase();
+    try {
+      const transaction = database.transaction(PREFERENCES_STORE, "readwrite");
+      transaction.objectStore(PREFERENCES_STORE).put(nickname, REMEMBERED_NICKNAME_KEY);
+      await transactionDone(transaction);
+    } finally {
+      database.close();
+    }
+  }
+}
+
 async function openWordPackFiles(): Promise<
   Array<{ name: string; bytes: Uint8Array }>
 > {
@@ -318,6 +351,7 @@ export function createBrowserContentServices(): LocalContentServices {
     wordPacks: new BrowserWordPackStore(),
     avatar: new BrowserAvatarStore(),
     wordSelection: new BrowserWordSelectionStore(),
+    nickname: new BrowserNicknamePreferenceStore(),
     wordFiles: {
       open: openWordPackFiles,
       save: saveWordPackFile

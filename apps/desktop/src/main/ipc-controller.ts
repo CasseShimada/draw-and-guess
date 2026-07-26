@@ -52,6 +52,7 @@ import {
 } from "../shared/ipc.js";
 import {
   LocalAvatarSchema,
+  RememberedNicknameSchema,
   ThemeApplyModeSchema,
   WordPackFileSchema,
   WordPackSelectionSchema,
@@ -677,6 +678,20 @@ export function registerIpcHandlers(services: IpcServices): () => void {
 
   handle(IPC_CHANNELS.contentAvatarRemove, z.undefined(), z.void(), async () =>
     services.content.removeAvatar()
+  );
+
+  handle(
+    IPC_CHANNELS.contentNicknameGet,
+    z.undefined(),
+    RememberedNicknameSchema.nullable(),
+    () => services.content.getRememberedNickname()
+  );
+
+  handle(
+    IPC_CHANNELS.contentNicknamePut,
+    RememberedNicknameSchema,
+    z.void(),
+    async (nickname) => services.content.putRememberedNickname(nickname)
   );
 
   handle(

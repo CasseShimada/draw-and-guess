@@ -7,6 +7,8 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 
+import { normalizeNicknameInput } from "@draw-guess/content";
+
 const scrypt = promisify(scryptCallback);
 const SCRYPT_KEY_BYTES = 64;
 
@@ -60,14 +62,7 @@ export function randomId(bytes = 16): string {
 }
 
 export function sanitizeNickname(value: string): string {
-  return [...value.normalize("NFKC")]
-    .filter((character) => {
-      const code = character.charCodeAt(0);
-      return !((code >= 0 && code <= 31) || (code >= 127 && code <= 159));
-    })
-    .join("")
-    .trim()
-    .slice(0, 24);
+  return normalizeNicknameInput(value);
 }
 
 export interface PlayerSession {

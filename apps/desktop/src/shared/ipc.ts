@@ -14,12 +14,14 @@ import type {
 import type { NormalizedCrop } from "@draw-guess/capture-core";
 import {
   CONTENT_LIMITS,
+  NicknameInputSchema,
   ThemeApplyModeSchema,
   WordPoolUploadSchema
 } from "@draw-guess/content";
 import type { ThemeApplyMode } from "@draw-guess/content";
 import type {
   LocalAvatarSchema,
+  RememberedNicknameSchema,
   WordPackFileSchema,
   WordPackSelectionSchema,
   WordPackSummarySchema
@@ -99,7 +101,9 @@ export const IPC_CHANNELS = {
   contentWordFilesSave: "content:word-files:save",
   contentAvatarGet: "content:avatar:get",
   contentAvatarPut: "content:avatar:put",
-  contentAvatarRemove: "content:avatar:remove"
+  contentAvatarRemove: "content:avatar:remove",
+  contentNicknameGet: "content:nickname:get",
+  contentNicknamePut: "content:nickname:put"
 } as const;
 
 export function desktopIpcErrorMessage(error: unknown): string {
@@ -304,7 +308,7 @@ export const ConfigureGameSchema = z
 
 export const CreateRoomArgsSchema = z
   .object({
-    nickname: z.string().trim().min(1).max(24),
+    nickname: NicknameInputSchema,
     password: z.string().min(4).max(128)
   })
   .strict();
@@ -318,7 +322,7 @@ export const JoinRoomArgsSchema = z
       .trim()
       .toUpperCase()
       .regex(/^[A-Z0-9]{6}$/),
-    nickname: z.string().trim().min(1).max(24),
+    nickname: NicknameInputSchema,
     password: z.string().min(4).max(128)
   })
   .strict();
@@ -720,6 +724,10 @@ export interface DesktopBridge {
       get(): Promise<z.infer<typeof LocalAvatarSchema> | null>;
       put(avatar: z.infer<typeof LocalAvatarSchema>): Promise<void>;
       remove(): Promise<void>;
+    };
+    nickname: {
+      get(): Promise<string | null>;
+      put(nickname: z.infer<typeof RememberedNicknameSchema>): Promise<void>;
     };
   };
 }

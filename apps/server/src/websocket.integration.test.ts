@@ -232,11 +232,25 @@ describe("real HTTP + WebSocket protocol-v5 integration", () => {
         }
       }
     });
+    const startMessageIndex = host.json.length;
     host.send({ type: "game:start", commandId: "ws-start" });
     const options = await host.waitForJson("classic:word-options");
+    const startMessages = host.json.slice(startMessageIndex);
+    const selectionSnapshotIndex = startMessages.findIndex(
+      (message) =>
+        message.type === "room:snapshot" &&
+        message.snapshot.game.mode === "classic" &&
+        message.snapshot.game.phase === "WORD_SELECTION" &&
+        message.snapshot.game.currentTurnId === options.turnId &&
+        message.snapshot.game.currentDrawerId === message.snapshot.selfPlayerId
+    );
+    const optionsIndex = startMessages.indexOf(options);
+    expect(selectionSnapshotIndex).toBeGreaterThanOrEqual(0);
+    expect(optionsIndex).toBeGreaterThan(selectionSnapshotIndex);
     expect(guest.json.some((message) => message.type === "classic:word-options")).toBe(
       false
     );
+    const selectMessageIndex = host.json.length;
     host.send({
       type: "classic:word-select",
       modeSessionId: options.modeSessionId,
@@ -245,6 +259,17 @@ describe("real HTTP + WebSocket protocol-v5 integration", () => {
       commandId: "ws-select"
     });
     const privateWord = await host.waitForJson("classic:word-selected");
+    const selectMessages = host.json.slice(selectMessageIndex);
+    const drawingSnapshotIndex = selectMessages.findIndex(
+      (message) =>
+        message.type === "room:snapshot" &&
+        message.snapshot.game.mode === "classic" &&
+        message.snapshot.game.phase === "DRAWING" &&
+        message.snapshot.game.selfDrawing?.actorStepId === privateWord.actorStepId
+    );
+    const privateWordIndex = selectMessages.indexOf(privateWord);
+    expect(drawingSnapshotIndex).toBeGreaterThanOrEqual(0);
+    expect(privateWordIndex).toBeGreaterThan(drawingSnapshotIndex);
     const captureStart = await host.waitForJson(
       "capture:start",
       (message) => message.stage === "drawing"

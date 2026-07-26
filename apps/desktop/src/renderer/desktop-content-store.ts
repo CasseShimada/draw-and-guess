@@ -16,6 +16,10 @@ export const desktopContentServices: LocalContentServices = {
     get: () => window.drawGuessDesktop.content.wordSelection.get(),
     put: (selection) => window.drawGuessDesktop.content.wordSelection.put(selection)
   },
+  nickname: {
+    get: () => window.drawGuessDesktop.content.nickname.get(),
+    put: (nickname) => window.drawGuessDesktop.content.nickname.put(nickname)
+  },
   wordFiles: {
     open: () => window.drawGuessDesktop.content.wordFiles.open(),
     save: (suggestedName, bytes) =>

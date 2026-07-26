@@ -57,6 +57,51 @@ const REFERENCE_UPLOAD_RATE_WINDOW_MS = 60_000;
 const RESUME_CAPTURE_DELAY_MS = 3_000;
 const MAX_PROCESSED_COMMAND_IDS = 2_048;
 const PROCESSED_COMMAND_TTL_MS = 15 * 60_000;
+const RECENT_RANDOM_NICKNAME_LIMIT = 128;
+const RANDOM_NICKNAME_ADJECTIVES = [
+  "快乐",
+  "机灵",
+  "勇敢",
+  "神秘",
+  "元气",
+  "悠闲",
+  "专注",
+  "好奇",
+  "轻快",
+  "温柔",
+  "热心",
+  "活泼",
+  "安静",
+  "自信",
+  "灵巧",
+  "浪漫",
+  "清醒",
+  "从容",
+  "闪亮",
+  "自在"
+] as const;
+const RANDOM_NICKNAME_NOUNS = [
+  "画笔",
+  "橘猫",
+  "海獭",
+  "星星",
+  "云朵",
+  "鲸鱼",
+  "松鼠",
+  "狐狸",
+  "月亮",
+  "灯塔",
+  "企鹅",
+  "熊猫",
+  "蜗牛",
+  "喜鹊",
+  "小鹿",
+  "河豚",
+  "雨燕",
+  "风筝",
+  "蘑菇",
+  "萤火虫"
+] as const;
 
 type RoomRemovalReason =
   "host-closed" | "idle-timeout" | "server-shutdown" | "room-removed";
@@ -75,6 +120,7 @@ export interface GameServiceOptions {
   turnResultMs: number;
   now?: () => number;
   randomIndex?: (maximum: number) => number;
+  nicknameRandomIndex?: (maximum: number) => number;
   replayService?: ReplayService;
   replayConfig?: ReplayHostConfig;
   hostControlKey?: string | null;
@@ -128,6 +174,9 @@ export class GameService {
   readonly #options: GameServiceOptions;
   readonly #now: () => number;
   readonly #randomIndex: (maximum: number) => number;
+  readonly #nicknameRandomIndex: (maximum: number) => number;
+  readonly #recentRandomNicknameBases: string[] = [];
+  readonly #recentRandomNicknameBaseSet = new Set<string>();
   readonly #hostControlKey: string | null;
   #initialization: Promise<void> | null = null;
 
@@ -135,6 +184,7 @@ export class GameService {
     this.#options = options;
     this.#now = options.now ?? Date.now;
     this.#randomIndex = options.randomIndex ?? randomInt;
+    this.#nicknameRandomIndex = options.nicknameRandomIndex ?? randomInt;
     this.#hostControlKey = options.hostControlKey ?? null;
     this.replayService =
       options.replayService ?? new ReplayService(options.replayConfig);
@@ -173,7 +223,8 @@ export class GameService {
     password: string,
     sessionKind: PlayerSession["kind"] = "browser"
   ): Promise<RoomJoinResult> {
-    const nickname = this.#tagNickname(this.#validateNickname(nicknameInput), []);
+    const nicknameBase = this.#resolveNickname(nicknameInput, []);
+    const nickname = this.#tagNickname(nicknameBase, []);
     let roomCode = randomRoomCode();
     while (this.rooms.has(roomCode)) {
       roomCode = randomRoomCode();
@@ -228,10 +279,9 @@ export class GameService {
     if (!(await verifyPassword(password, room.password))) {
       throw new GameError(ErrorCode.UNAUTHORIZED, "房间密码错误", 401);
     }
-    const nickname = this.#tagNickname(
-      this.#validateNickname(nicknameInput),
-      room.players.values()
-    );
+    const existingPlayers = [...room.players.values()];
+    const nicknameBase = this.#resolveNickname(nicknameInput, existingPlayers);
+    const nickname = this.#tagNickname(nicknameBase, existingPlayers);
     const now = this.#now();
     const player = this.#createPlayer(nickname, now);
     room.players.set(player.id, player);
@@ -1593,12 +1643,76 @@ export class GameService {
     };
   }
 
-  #validateNickname(value: string): string {
+  #resolveNickname(value: string, players: readonly Player[]): string {
     const nickname = sanitizeNickname(value);
-    if (!nickname || [...nickname].length > 24) {
+    if (!nickname) {
+      return this.#randomNicknameBase(players);
+    }
+    if ([...nickname].length > 24) {
       throw new GameError(ErrorCode.BAD_MESSAGE, "昵称格式不正确");
     }
     return nickname;
+  }
+
+  #randomNicknameBase(players: readonly Player[]): string {
+    const roomBases = new Set(
+      players.map((player) => player.nickname.replace(/#\d{4}$/u, ""))
+    );
+    const combinationCount =
+      RANDOM_NICKNAME_ADJECTIVES.length * RANDOM_NICKNAME_NOUNS.length;
+    const start = this.#nicknameRandomIndex(combinationCount);
+    const candidateAt = (offset: number) => {
+      const index = (start + offset) % combinationCount;
+      const adjective =
+        RANDOM_NICKNAME_ADJECTIVES[Math.floor(index / RANDOM_NICKNAME_NOUNS.length)]!;
+      const noun = RANDOM_NICKNAME_NOUNS[index % RANDOM_NICKNAME_NOUNS.length]!;
+      return `${adjective}${noun}`;
+    };
+    let selected: string | null = null;
+    for (let offset = 0; offset < combinationCount; offset += 1) {
+      const candidate = candidateAt(offset);
+      if (
+        !roomBases.has(candidate) &&
+        !this.#recentRandomNicknameBaseSet.has(candidate)
+      ) {
+        selected = candidate;
+        break;
+      }
+    }
+    if (!selected) {
+      for (let offset = 0; offset < combinationCount; offset += 1) {
+        const candidate = candidateAt(offset);
+        if (!roomBases.has(candidate)) {
+          selected = candidate;
+          break;
+        }
+      }
+    }
+    if (!selected) {
+      const fallbackStart = this.#nicknameRandomIndex(10_000);
+      for (let offset = 0; offset < 10_000; offset += 1) {
+        const candidate = `匿名画友${String((fallbackStart + offset) % 10_000).padStart(
+          4,
+          "0"
+        )}`;
+        if (!roomBases.has(candidate)) {
+          selected = candidate;
+          break;
+        }
+      }
+    }
+    if (!selected) {
+      throw new GameError(ErrorCode.INVALID_STATE, "随机昵称已用完", 409);
+    }
+    this.#recentRandomNicknameBases.push(selected);
+    this.#recentRandomNicknameBaseSet.add(selected);
+    while (this.#recentRandomNicknameBases.length > RECENT_RANDOM_NICKNAME_LIMIT) {
+      const oldest = this.#recentRandomNicknameBases.shift();
+      if (oldest) {
+        this.#recentRandomNicknameBaseSet.delete(oldest);
+      }
+    }
+    return selected;
   }
 
   #tagNickname(nickname: string, players: Iterable<Player>): string {
@@ -1610,7 +1724,7 @@ export class GameService {
     if (usedTags.size >= 10_000) {
       throw new GameError(ErrorCode.INVALID_STATE, "房间昵称编号已用完", 409);
     }
-    const start = randomInt(10_000);
+    const start = this.#nicknameRandomIndex(10_000);
     for (let offset = 0; offset < 10_000; offset += 1) {
       const tag = String((start + offset) % 10_000).padStart(4, "0");
       if (!usedTags.has(tag)) {

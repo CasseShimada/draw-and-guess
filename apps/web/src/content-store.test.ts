@@ -130,6 +130,12 @@ describe("browser IndexedDB content adapters", () => {
     await services.wordSelection.put(selection);
     expect(await services.wordSelection.get()).toEqual(selection);
 
+    expect(await services.nickname.get()).toBeNull();
+    await services.nickname.put("  常用画手  ");
+    expect(await services.nickname.get()).toBe("常用画手");
+    await expect(services.nickname.put("   ")).rejects.toThrow("不能为空");
+    expect(await services.nickname.get()).toBe("常用画手");
+
     await expect(services.wordPacks.put(BUILTIN_WORD_PACK)).rejects.toThrow("只读");
     await expect(
       services.wordPacks.put({

@@ -332,14 +332,16 @@ export class ClassicModeController implements GameModeController<"classic"> {
         1_000;
     if (previousPhase === "WORD_SELECTION") {
       this.#scheduleSelectionDeadline(context);
+      context.broadcastSnapshots();
       this.#sendOptions(context);
     } else {
       if (!current.selectedWord) {
         throw new GameError(ErrorCode.INTERNAL_ERROR, "经典模式答案状态丢失", 500);
       }
-      this.#createDrawingLifecycle(context, current.selectedWord, false);
+      this.#createDrawingLifecycle(context);
+      context.broadcastSnapshots();
+      this.#announceDrawingLifecycle(context);
     }
-    context.broadcastSnapshots();
     return { kind: "handoff-input" };
   }
 
@@ -494,8 +496,8 @@ export class ClassicModeController implements GameModeController<"classic"> {
     current.phaseEndsAt =
       effectiveNow(context) + current.settings.selectionSeconds * 1_000;
     this.#scheduleSelectionDeadline(context);
-    this.#sendOptions(context);
     context.broadcastSnapshots();
+    this.#sendOptions(context);
     this.#scheduleDrawerGrace(context);
   }
 
@@ -544,16 +546,13 @@ export class ClassicModeController implements GameModeController<"classic"> {
     current.turnScoreStart = new Map(current.scores);
     current.frameStore.clear();
     current.actorStepId = context.randomId(12);
-    this.#createDrawingLifecycle(context, word, true);
+    this.#createDrawingLifecycle(context);
     context.broadcastSnapshots();
+    this.#announceDrawingLifecycle(context);
     this.#scheduleDrawerGrace(context);
   }
 
-  #createDrawingLifecycle(
-    context: ModeContext,
-    _word: NormalizedPoolWord,
-    sendPrivateWord: boolean
-  ): void {
+  #createDrawingLifecycle(context: ModeContext): void {
     const current = state(context);
     if (!current.currentDrawerId || !current.actorStepId) {
       throw new GameError(ErrorCode.INTERNAL_ERROR, "经典画手状态不存在", 500);
@@ -571,18 +570,6 @@ export class ClassicModeController implements GameModeController<"classic"> {
       captureSessionId,
       latest: null
     };
-    if (sendPrivateWord) {
-      this.#sendSelectedWord(context);
-    } else {
-      this.#sendSelectedWord(context);
-    }
-    context.issueCapture({
-      playerId: current.currentDrawerId,
-      actorStepId: current.actorStepId,
-      captureSessionId,
-      stage: "drawing",
-      expiresAt: drawingEndsAt
-    });
     const modeSessionId = context.room.modeSessionId;
     const actorStepId = current.actorStepId;
     context.room.modeScheduler.scheduleAt(
@@ -599,6 +586,27 @@ export class ClassicModeController implements GameModeController<"classic"> {
         }
       }
     );
+  }
+
+  #announceDrawingLifecycle(context: ModeContext): void {
+    const current = state(context);
+    const drawing = current.drawing;
+    if (
+      !current.currentDrawerId ||
+      !current.actorStepId ||
+      !drawing ||
+      drawing.status !== "drawing"
+    ) {
+      throw new GameError(ErrorCode.INTERNAL_ERROR, "经典绘画状态不存在", 500);
+    }
+    this.#sendSelectedWord(context);
+    context.issueCapture({
+      playerId: current.currentDrawerId,
+      actorStepId: current.actorStepId,
+      captureSessionId: drawing.captureSessionId,
+      stage: "drawing",
+      expiresAt: drawing.drawingEndsAt
+    });
   }
 
   #beginFinalization(

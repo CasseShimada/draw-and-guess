@@ -115,11 +115,13 @@ describe("Electron versioned content storage", () => {
       ]
     };
     await service.putWordSelection(selection);
+    await service.putRememberedNickname("  常用房主  ");
 
     const restarted = new ContentStorageService(userData);
     await restarted.initialize();
     expect(await restarted.getWordPack(pack.id)).toEqual(pack);
     expect(await restarted.getWordSelection()).toEqual(selection);
+    expect(await restarted.getRememberedNickname()).toBe("常用房主");
     expect(await restarted.listWordPacks()).toEqual([
       expect.objectContaining({ id: pack.id, builtIn: false })
     ]);
@@ -142,6 +144,8 @@ describe("Electron versioned content storage", () => {
       restarted.saveExport(exportPath, Uint8Array.from([1, 2, 3]))
     ).rejects.toThrow();
     expect(await readFile(exportPath, "utf8")).toBe(before);
+    await expect(restarted.putRememberedNickname("   ")).rejects.toThrow("不能为空");
+    expect(await restarted.getRememberedNickname()).toBe("常用房主");
   });
 
   it("stores a validated avatar pair, migrates metadata, and cleans it on reset", async () => {

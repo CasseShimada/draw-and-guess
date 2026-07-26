@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { NicknameInputSchema } from "@draw-guess/content";
 import {
   CLASSIC_PHASES,
   DRAW_RELAY_PHASES,
@@ -13,7 +14,7 @@ import {
 } from "@draw-guess/shared-types";
 
 export const PROTOCOL_VERSION = 5;
-export const APPLICATION_VERSION = "0.5.8";
+export const APPLICATION_VERSION = "0.5.9";
 export const MAX_JSON_MESSAGE_BYTES = 16 * 1024;
 export const MAX_ENCODED_IMAGE_BYTES = 2 * 1024 * 1024;
 export const MAX_FRAME_PACKET_BYTES = MAX_ENCODED_IMAGE_BYTES + 8;
@@ -55,21 +56,6 @@ export const ConnectionInfoSchema = z
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>;
 
-const NicknameSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(24)
-  .transform((value) =>
-    [...value]
-      .filter((character) => {
-        const code = character.charCodeAt(0);
-        return !((code >= 0 && code <= 31) || (code >= 127 && code <= 159));
-      })
-      .join("")
-  )
-  .refine((value) => value.length > 0);
-
 const RoomCodeSchema = z
   .string()
   .trim()
@@ -82,7 +68,7 @@ const RevisionSchema = z.string().regex(/^[a-f0-9]{64}$/);
 
 export const CreateRoomRequestSchema = z
   .object({
-    nickname: NicknameSchema,
+    nickname: NicknameInputSchema,
     password: z.string().min(4).max(128)
   })
   .strict();
@@ -90,7 +76,7 @@ export const CreateRoomRequestSchema = z
 export const JoinRoomRequestSchema = z
   .object({
     roomCode: RoomCodeSchema,
-    nickname: NicknameSchema,
+    nickname: NicknameInputSchema,
     password: z.string().min(4).max(128)
   })
   .strict();
