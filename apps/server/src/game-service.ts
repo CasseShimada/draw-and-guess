@@ -4,6 +4,7 @@ import type { WordPoolUpload } from "@draw-guess/content";
 import {
   ErrorCode,
   MIN_FRAME_INTERVAL_MS,
+  ROOM_REMOVED_CLOSE_CODE,
   SLOW_CLIENT_BUFFER_BYTES,
   decodeUploadFrame,
   encodeViewerFrame,
@@ -56,6 +57,16 @@ const REFERENCE_UPLOAD_RATE_WINDOW_MS = 60_000;
 const RESUME_CAPTURE_DELAY_MS = 3_000;
 const MAX_PROCESSED_COMMAND_IDS = 2_048;
 const PROCESSED_COMMAND_TTL_MS = 15 * 60_000;
+
+type RoomRemovalReason =
+  "host-closed" | "idle-timeout" | "server-shutdown" | "room-removed";
+
+const ROOM_REMOVAL_MESSAGES: Record<RoomRemovalReason, string> = {
+  "host-closed": "房主已关闭房间",
+  "idle-timeout": "房间长时间无人连接，已自动关闭",
+  "server-shutdown": "房间服务已停止",
+  "room-removed": "房间已关闭"
+};
 
 export interface GameServiceOptions {
   roomIdleTtlMs: number;
@@ -758,6 +769,12 @@ export class GameService {
     this.broadcastSnapshots(room);
   }
 
+  closeRoomFromEmbeddedHost(hostControlKey: string, roomCode: string): void {
+    this.#requireHostControl(hostControlKey);
+    const room = this.#requireRoom(roomCode);
+    this.destroyRoom(room.roomCode, "host-closed");
+  }
+
   pauseFromEmbeddedHost(hostControlKey: string, roomCode: string): void {
     this.#requireHostControl(hostControlKey);
     const room = this.#requireRoom(roomCode);
@@ -929,17 +946,18 @@ export class GameService {
         now - room.lastActivityAt >= this.#options.roomIdleTtlMs
       ) {
         removed.push(room.roomCode);
-        this.destroyRoom(room.roomCode);
+        this.destroyRoom(room.roomCode, "idle-timeout");
       }
     }
     return removed;
   }
 
-  destroyRoom(roomCode: string): void {
+  destroyRoom(roomCode: string, reason: RoomRemovalReason = "room-removed"): void {
     const room = this.rooms.get(roomCode);
     if (!room) {
       return;
     }
+    const message = ROOM_REMOVAL_MESSAGES[reason];
     const context = this.#context(room);
     this.#registry.controller(room.modeRuntime.mode).dispose(context, "room-destroyed");
     room.modeScheduler.cancelAll();
@@ -962,7 +980,12 @@ export class GameService {
           captureSessionId: 0,
           reason: "server-shutdown"
         });
-        player.socket.close(4004, "房间已清理");
+        this.#send(player.socket, {
+          type: "error",
+          code: ErrorCode.NOT_FOUND,
+          message
+        });
+        player.socket.close(ROOM_REMOVED_CLOSE_CODE, message);
       }
     }
     this.sessions.removeRoom(roomCode);
@@ -982,7 +1005,7 @@ export class GameService {
 
   async shutdown(): Promise<void> {
     for (const roomCode of [...this.rooms.keys()]) {
-      this.destroyRoom(roomCode);
+      this.destroyRoom(roomCode, "server-shutdown");
     }
     this.#chatWindows.clear();
     this.#avatarWindows.clear();

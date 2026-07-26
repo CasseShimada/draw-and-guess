@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  ROOM_REMOVED_CLOSE_CODE,
   SLOW_CLIENT_BUFFER_BYTES,
   ServerJsonMessageSchema,
   RelayPrivateTaskResponseSchema,
@@ -72,6 +73,13 @@ function asUint8Array(data: RawData): Uint8Array {
     return new Uint8Array(Buffer.concat(data));
   }
   return new Uint8Array(data);
+}
+
+export function roomRemovalMessage(code: number, reason: string): string | null {
+  if (code !== ROOM_REMOVED_CLOSE_CODE) {
+    return null;
+  }
+  return reason.trim() || "房间已关闭，请重新创建或加入房间";
 }
 
 export class GameClientService {
@@ -502,7 +510,7 @@ export class GameClientService {
       this.#emit({ kind: "message", message: parsed.data });
     });
 
-    socket.on("close", (code) => {
+    socket.on("close", (code, reason) => {
       if (this.#epoch !== epoch || this.#socket !== socket) {
         return;
       }
@@ -510,6 +518,24 @@ export class GameClientService {
       this.#clearTimers();
       if (this.#manualDisconnect) {
         this.#emit({ kind: "connection", state: "offline" });
+        return;
+      }
+      const removedMessage = roomRemovalMessage(code, reason.toString("utf8"));
+      if (removedMessage) {
+        this.#manualDisconnect = true;
+        this.#attempt = 0;
+        this.#token = null;
+        void this.#settings.clearSession(this.#target).catch((error: unknown) => {
+          this.#logger.warn("清除已关闭房间的本地会话失败", {
+            message: error instanceof Error ? error.message : "未知错误"
+          });
+        });
+        this.#logger.info("房间已被服务器关闭", { code, reason: removedMessage });
+        this.#emit({
+          kind: "connection",
+          state: "offline",
+          error: removedMessage
+        });
         return;
       }
       this.#attempt += 1;

@@ -33,7 +33,11 @@ afterEach(async () => {
 });
 
 describe("settings service", () => {
-  it("deterministically migrates schema 4 to schema 5 without losing unrelated settings", () => {
+  it("exits on window close by default unless tray mode is explicitly enabled", () => {
+    expect(migrateDesktopSettings(null).minimizeToTray).toBe(false);
+  });
+
+  it("deterministically migrates schema 4 to schema 6 without losing unrelated settings", () => {
     expect(
       migrateDesktopSettings({
         schemaVersion: 4,
@@ -57,7 +61,7 @@ describe("settings service", () => {
         }
       })
     ).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       currentClientTarget: {
         host: "example.com",
         port: 443,
@@ -73,6 +77,24 @@ describe("settings service", () => {
         source: { x: 0, y: 0, width: 1, height: 1 }
       }
     });
+  });
+
+  it("resets the old schema-5 tray default once, then preserves explicit schema-6 choices", () => {
+    const version5 = {
+      ...migrateDesktopSettings(null),
+      schemaVersion: 5,
+      minimizeToTray: true,
+      onboardingComplete: true
+    };
+    const migrated = migrateDesktopSettings(version5);
+    expect(migrated).toMatchObject({
+      schemaVersion: 6,
+      minimizeToTray: false,
+      onboardingComplete: true
+    });
+    expect(
+      migrateDesktopSettings({ ...migrated, minimizeToTray: true }).minimizeToTray
+    ).toBe(true);
   });
 
   it("falls back safely when a legacy server URL is invalid", () => {
@@ -173,7 +195,7 @@ describe("settings service", () => {
       await readFile(path.join(directory, "settings.json"), "utf8")
     ) as Record<string, unknown>;
     expect(persisted).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       hostBindMode: "lan",
       hostPort: 4567,
       qualityPreset: "high"

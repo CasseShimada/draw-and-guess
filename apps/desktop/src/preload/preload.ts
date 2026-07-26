@@ -153,6 +153,11 @@ const bridge: DesktopBridge = {
         { roomCode, password }
       );
     },
+    closeRoom: async (roomCode) => {
+      await invoke(IPC_CHANNELS.serverCloseRoom, HostRoomArgsSchema, z.void(), {
+        roomCode
+      });
+    },
     refreshNetworks: () =>
       invoke(
         IPC_CHANNELS.serverRefreshNetworks,

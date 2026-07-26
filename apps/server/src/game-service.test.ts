@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  ROOM_REMOVED_CLOSE_CODE,
   decodeViewerFrame,
   encodeUploadFrame,
   type ClientJsonMessage,
@@ -20,12 +21,14 @@ class FakeSocket implements GameSocket {
   readyState = 1;
   bufferedAmount = 0;
   readonly sent: Array<string | Uint8Array> = [];
+  closedWith: { code?: number; reason?: string } | null = null;
 
   send(data: string | Uint8Array): void {
     this.sent.push(data);
   }
 
-  close(): void {
+  close(code?: number, reason?: string): void {
+    this.closedWith = { code, reason };
     this.readyState = 3;
   }
 }
@@ -143,6 +146,40 @@ describe("game service protocol-v4 classic flow", () => {
     expect(service.resumeSession(hostJoin.sessionToken, "desktop").player.id).toBe(
       hostJoin.snapshot.selfPlayerId
     );
+  });
+
+  it("lets only the embedded host close a room and gives every player a terminal reason", async () => {
+    const hostJoin = await service.createRoom("房主", "secret", "desktop");
+    const roomCode = hostJoin.snapshot.roomCode;
+    const guestJoin = await service.joinRoom(roomCode, "玩家", "secret", "desktop");
+    const host = service.resumeSession(hostJoin.sessionToken, "desktop");
+    const guest = service.resumeSession(guestJoin.sessionToken, "desktop");
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+    service.connectPlayer(host, hostSocket, "desktop");
+    service.connectPlayer(guest, guestSocket, "desktop");
+
+    expect(() => service.closeRoomFromEmbeddedHost("remote-forgery", roomCode)).toThrow(
+      "此操作只允许实际内嵌服务器主机执行"
+    );
+    expect(service.rooms.has(roomCode)).toBe(true);
+
+    service.closeRoomFromEmbeddedHost("local-host-key", roomCode);
+
+    expect(service.rooms.has(roomCode)).toBe(false);
+    for (const socket of [hostSocket, guestSocket]) {
+      expect(latestMessage(socket, "error")).toMatchObject({
+        code: "NOT_FOUND",
+        message: "房主已关闭房间"
+      });
+      expect(socket.closedWith).toEqual({
+        code: ROOM_REMOVED_CLOSE_CODE,
+        reason: "房主已关闭房间"
+      });
+    }
+    await expect(
+      service.joinRoom(roomCode, "迟到玩家", "secret", "desktop")
+    ).rejects.toThrow("房间不存在");
   });
 
   it("keeps words private, relays accepted frames, finalizes for ten seconds, and scores", async () => {

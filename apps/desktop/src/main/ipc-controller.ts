@@ -258,7 +258,11 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     EmbeddedServerStatusSchema,
     async ({ port, bindMode, restart }) => {
       if (restart && services.embeddedServer.status.state === "running") {
-        await services.gameClient.disconnect();
+        await services.gameClient.clearSession().catch((error: unknown) => {
+          services.logger.warn("重启服务前清除本地会话文件失败", {
+            message: error instanceof Error ? error.message : "未知错误"
+          });
+        });
       }
       const status = await services.embeddedServer.start(port, bindMode, restart);
       if (status.state === "running" && status.actualPort) {
@@ -281,7 +285,11 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     z.undefined(),
     EmbeddedServerStatusSchema,
     async () => {
-      await services.gameClient.disconnect();
+      await services.gameClient.clearSession().catch((error: unknown) => {
+        services.logger.warn("停止服务前清除本地会话文件失败", {
+          message: error instanceof Error ? error.message : "未知错误"
+        });
+      });
       return services.embeddedServer.stop();
     }
   );
@@ -300,6 +308,20 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     z.void(),
     async ({ roomCode, password }) =>
       services.embeddedServer.changeRoomPassword(roomCode, password)
+  );
+
+  handle(
+    IPC_CHANNELS.serverCloseRoom,
+    HostRoomArgsSchema,
+    z.void(),
+    async ({ roomCode }) => {
+      services.embeddedServer.closeRoom(roomCode);
+      await services.gameClient.clearSession().catch((error: unknown) => {
+        services.logger.warn("房间已关闭，但清除本地会话文件失败", {
+          message: error instanceof Error ? error.message : "未知错误"
+        });
+      });
+    }
   );
 
   handle(

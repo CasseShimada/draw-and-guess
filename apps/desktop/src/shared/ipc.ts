@@ -39,6 +39,7 @@ export const IPC_CHANNELS = {
   serverPause: "server:pause",
   serverResume: "server:resume",
   serverChangeRoomPassword: "server:change-room-password",
+  serverCloseRoom: "server:close-room",
   serverRefreshNetworks: "server:refresh-networks",
   connectionTest: "connection:test",
   systemOpenFirewallSettings: "system:open-firewall-settings",
@@ -107,7 +108,7 @@ export const NormalizedCropSchema = z
 
 export const DesktopSettingsSchema = z
   .object({
-    schemaVersion: z.literal(5),
+    schemaVersion: z.literal(6),
     currentClientTarget: ConnectionTargetSchema,
     hostPort: z.number().int().min(1).max(65_535),
     hostBindMode: z.enum(["loopback-only", "lan"]),
@@ -591,6 +592,7 @@ export interface DesktopBridge {
     pause(roomCode: string): Promise<void>;
     resume(roomCode: string): Promise<void>;
     changeRoomPassword(roomCode: string, password: string): Promise<void>;
+    closeRoom(roomCode: string): Promise<void>;
     refreshNetworks(): Promise<EmbeddedServerStatus>;
     onStatus(listener: (status: EmbeddedServerStatus) => void): () => void;
   };

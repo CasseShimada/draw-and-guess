@@ -17,6 +17,7 @@ import {
 } from "@draw-guess/content";
 import {
   PROTOCOL_VERSION,
+  ROOM_REMOVED_CLOSE_CODE,
   ServerJsonMessageSchema,
   decodeViewerFrame,
   type RelayPrivateTask,
@@ -30,7 +31,7 @@ import type {
 } from "@draw-guess/shared-types";
 
 import { AvatarEditor } from "./AvatarEditor.js";
-import { HostRoomCodeBanner } from "./HostRoomCodeBanner.js";
+import { RoomCodeCopyButton } from "./RoomCodeCopyButton.js";
 import { WordPackManager } from "./WordPackManager.js";
 import { createBrowserContentServices } from "./content-store.js";
 import { GAME_MODE_LABELS, ModeRenderer } from "./modes/registry.js";
@@ -579,6 +580,24 @@ export function App({
     setFrameUrl(null);
   }, []);
 
+  const leaveClosedRoom = useCallback(
+    (message: string) => {
+      clearFrame();
+      snapshotRef.current = null;
+      frameContextRef.current = "";
+      avatarSyncKeyRef.current = "";
+      setSnapshot(null);
+      setConnection("offline");
+      setWordOptions([]);
+      setWordOptionsActorStepId(null);
+      setCurrentWord(null);
+      setSavedReplayAvailable(false);
+      onSnapshot?.(null);
+      reportEntryError(message || "房间已关闭，请重新创建或加入房间");
+    },
+    [clearFrame, onSnapshot, reportEntryError]
+  );
+
   const applySnapshot = useCallback(
     (next: PublicRoomSnapshot) => {
       const nextContext = drawingContext(next);
@@ -884,8 +903,12 @@ export function App({
           );
         }
       });
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (disposed) {
+          return;
+        }
+        if (event.code === ROOM_REMOVED_CLOSE_CODE) {
+          leaveClosedRoom(event.reason);
           return;
         }
         setConnection("reconnecting");
@@ -919,7 +942,14 @@ export function App({
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [applyFrame, handleServerMessage, notify, snapshot?.roomCode, transport]);
+  }, [
+    applyFrame,
+    handleServerMessage,
+    leaveClosedRoom,
+    notify,
+    snapshot?.roomCode,
+    transport
+  ]);
 
   useEffect(() => {
     if (!transport) {
@@ -928,7 +958,9 @@ export function App({
     return transport.onEvent((event) => {
       if (event.kind === "connection") {
         setConnection(event.state);
-        if (event.error) {
+        if (event.state === "offline" && event.error) {
+          leaveClosedRoom(event.error);
+        } else if (event.error) {
           notify(event.error);
         }
       } else if (event.kind === "message") {
@@ -944,7 +976,7 @@ export function App({
         }
       }
     });
-  }, [applyFrame, handleServerMessage, notify, send, transport]);
+  }, [applyFrame, handleServerMessage, leaveClosedRoom, notify, send, transport]);
 
   useEffect(() => {
     const replay = hostControls?.replay;
@@ -1473,7 +1505,10 @@ export function App({
           </span>
           <span>
             <strong>画猜现场</strong>
-            <small>房间码 {snapshot.roomCode}</small>
+            <RoomCodeCopyButton
+              onCopy={() => void copyRoomCode(snapshot.roomCode)}
+              roomCode={snapshot.roomCode}
+            />
           </span>
         </div>
         <div className="topbar__status">
@@ -1586,12 +1621,6 @@ export function App({
         </div>
       )}
       <PassControls send={send} snapshot={snapshot} />
-      {isLobby && isLogicalHost && (
-        <HostRoomCodeBanner
-          onCopy={() => void copyRoomCode(snapshot.roomCode)}
-          roomCode={snapshot.roomCode}
-        />
-      )}
       {isLobby && isLogicalHost && (
         <section
           aria-label="选择游戏模式"

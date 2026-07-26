@@ -309,55 +309,41 @@ input {
   gap: 1rem;
 }
 
-.host-room-code-banner {
-  display: flex;
-  width: min(1500px, 94vw);
-  margin: 2rem auto 0;
-  padding: 1rem 1.25rem;
+.brand-room-code {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 0.18rem;
+  padding: 0;
   align-items: center;
-  justify-content: space-between;
-  border: 3px solid var(--line);
-  background: var(--yellow);
-  box-shadow: 6px 6px 0 var(--line);
-  gap: 1.5rem;
-}
-
-.host-room-code-banner p {
-  margin: 0;
-}
-
-.host-room-code-banner > div > p:last-child {
-  margin-top: 0.4rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.host-room-code-banner__code {
-  display: flex;
-  margin-top: 0.25rem;
-  align-items: center;
-  gap: 0.8rem;
-}
-
-.host-room-code-banner__code h2 {
-  margin: 0;
-  font-size: 1rem;
-}
-
-.host-room-code-banner__code code {
-  padding: 0.25rem 0.55rem 0.25rem 0.75rem;
-  border: 2px solid var(--line);
-  background: var(--paper-light);
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  font-weight: 900;
-  letter-spacing: 0.18em;
+  border: 0;
+  background: transparent;
+  cursor: copy;
+  gap: 0.4rem;
   line-height: 1;
+  text-align: left;
 }
 
-.host-room-code-banner .primary-button {
-  flex: 0 0 auto;
-  white-space: nowrap;
+.brand-room-code small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.brand-room-code code {
+  color: var(--ink);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.brand-room-code:hover code,
+.brand-room-code:focus-visible code {
+  color: var(--coral-dark);
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
 }
 
 .phase-label {
@@ -2279,26 +2265,12 @@ input {
     align-items: flex-start;
   }
 
-  .topbar .brand > span:last-child {
+  .topbar .brand strong {
     display: none;
   }
 
-  .host-room-code-banner {
-    margin-top: 1rem;
-    align-items: stretch;
-    flex-direction: column;
-    gap: 0.8rem;
-  }
-
-  .host-room-code-banner__code {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .host-room-code-banner__code code {
-    width: 100%;
-    text-align: center;
+  .topbar .brand > span:last-child {
+    display: grid;
   }
 
   .pass-controls {

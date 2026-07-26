@@ -13,12 +13,13 @@ import {
 } from "@draw-guess/shared-types";
 
 export const PROTOCOL_VERSION = 4;
-export const APPLICATION_VERSION = "0.5.4";
+export const APPLICATION_VERSION = "0.5.5";
 export const MAX_JSON_MESSAGE_BYTES = 16 * 1024;
 export const MAX_ENCODED_IMAGE_BYTES = 2 * 1024 * 1024;
 export const MAX_FRAME_PACKET_BYTES = MAX_ENCODED_IMAGE_BYTES + 8;
 export const MIN_FRAME_INTERVAL_MS = 800;
 export const SLOW_CLIENT_BUFFER_BYTES = 2 * 1024 * 1024;
+export const ROOM_REMOVED_CLOSE_CODE = 4004;
 
 export const ErrorCode = {
   BAD_MESSAGE: "BAD_MESSAGE",

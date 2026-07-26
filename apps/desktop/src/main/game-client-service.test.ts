@@ -2,11 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { PROTOCOL_VERSION } from "@draw-guess/protocol";
+import { PROTOCOL_VERSION, ROOM_REMOVED_CLOSE_CODE } from "@draw-guess/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConnectionPreflightService } from "./connection-preflight-service.js";
-import { GameClientService } from "./game-client-service.js";
+import { GameClientService, roomRemovalMessage } from "./game-client-service.js";
 import { RedactingLogger } from "./redacting-logger.js";
 import { SettingsService, type EncryptionProvider } from "./settings-service.js";
 
@@ -22,7 +22,7 @@ function connectionInfoResponse(): Response {
   return new Response(
     JSON.stringify({
       service: "draw-guess",
-      appVersion: "0.5.4",
+      appVersion: "0.5.5",
       protocolVersion: PROTOCOL_VERSION,
       serverInstanceId: "i".repeat(43),
       now: Date.now(),
@@ -43,6 +43,16 @@ afterEach(async () => {
 });
 
 describe("game client target epochs", () => {
+  it("treats a removed-room close as terminal instead of reconnecting", () => {
+    expect(roomRemovalMessage(ROOM_REMOVED_CLOSE_CODE, "房主已关闭房间")).toBe(
+      "房主已关闭房间"
+    );
+    expect(roomRemovalMessage(ROOM_REMOVED_CLOSE_CODE, "  ")).toBe(
+      "房间已关闭，请重新创建或加入房间"
+    );
+    expect(roomRemovalMessage(1006, "网络中断")).toBeNull();
+  });
+
   it("actively aborts an old request and discards its session when the target changes", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "draw-guess-client-"));
     directories.push(directory);

@@ -52,8 +52,12 @@ const DEFAULT_TARGET: ConnectionTarget = {
   security: "http"
 };
 
+const DesktopSettingsV5Schema = DesktopSettingsSchema.extend({
+  schemaVersion: z.literal(5)
+});
+
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   currentClientTarget: DEFAULT_TARGET,
   hostPort: 3000,
   hostBindMode: "loopback-only",
@@ -61,7 +65,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   recentConnections: [],
   publicEndpoint: null,
   insecureHttpConfirmations: [],
-  minimizeToTray: true,
+  minimizeToTray: false,
   launchAtLogin: false,
   stopSharingShortcut: "CommandOrControl+Shift+S",
   qualityPreset: "balanced",
@@ -138,6 +142,15 @@ export function migrateDesktopSettings(input: unknown): DesktopSettings {
       recentConnections: dedupeRecent(current.data.recentConnections)
     };
   }
+  const version5 = DesktopSettingsV5Schema.safeParse(input);
+  if (version5.success) {
+    return DesktopSettingsSchema.parse({
+      ...version5.data,
+      schemaVersion: 6,
+      minimizeToTray: false,
+      recentConnections: dedupeRecent(version5.data.recentConnections)
+    });
+  }
   if (typeof input !== "object" || input === null) {
     return structuredClone(DEFAULT_DESKTOP_SETTINGS);
   }
@@ -149,7 +162,7 @@ export function migrateDesktopSettings(input: unknown): DesktopSettings {
     DEFAULT_DESKTOP_SETTINGS.hostPort
   );
   const candidate: DesktopSettings = {
-    schemaVersion: 5,
+    schemaVersion: 6,
     currentClientTarget: target,
     hostPort,
     hostBindMode: legacy.allowLan === true ? "lan" : "loopback-only",
@@ -163,11 +176,7 @@ export function migrateDesktopSettings(input: unknown): DesktopSettings {
     ],
     publicEndpoint: null,
     insecureHttpConfirmations: [],
-    minimizeToTray: safeValue(
-      DesktopSettingsSchema.shape.minimizeToTray,
-      legacy.minimizeToTray,
-      DEFAULT_DESKTOP_SETTINGS.minimizeToTray
-    ),
+    minimizeToTray: false,
     launchAtLogin: safeValue(
       DesktopSettingsSchema.shape.launchAtLogin,
       legacy.launchAtLogin,

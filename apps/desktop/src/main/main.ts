@@ -224,21 +224,32 @@ async function runSmokeCheck(
       const roomCodeUi = await new Promise((resolve) => {
         const deadline = Date.now() + 5_000;
         const inspect = () => {
-          const banner = document.querySelector('[data-ui="host-room-code"]');
-          const copyButton = banner?.querySelector('[data-ui="copy-room-code"]');
-          const displayedCode = banner?.querySelector("code")?.textContent?.trim();
+          const copyButton = document.querySelector('[data-ui="room-code-copy"]');
+          const displayedCode = copyButton?.querySelector("code")?.textContent?.trim();
+          const compactInTopbar = Boolean(copyButton?.closest('[data-ui="topbar"]'));
+          const largeInviteBannerAbsent =
+            document.querySelector(".host-room-code-banner") === null;
           if (
             displayedCode === response.snapshot.roomCode &&
-            copyButton?.textContent?.trim() === "复制房间码"
+            compactInTopbar &&
+            largeInviteBannerAbsent
           ) {
-            resolve({ visible: true, displayedCode, hasCopyButton: true });
+            resolve({
+              visible: true,
+              displayedCode,
+              hasCopyButton: copyButton?.tagName === "BUTTON",
+              compactInTopbar,
+              largeInviteBannerAbsent
+            });
             return;
           }
           if (Date.now() >= deadline) {
             resolve({
               visible: false,
               displayedCode: displayedCode ?? null,
-              hasCopyButton: Boolean(copyButton)
+              hasCopyButton: copyButton?.tagName === "BUTTON",
+              compactInTopbar,
+              largeInviteBannerAbsent
             });
             return;
           }
@@ -256,6 +267,7 @@ async function runSmokeCheck(
         target: response.target,
         server: response.server,
         persistedTarget: refreshed.settings.currentClientTarget,
+        defaultMinimizeToTray: refreshed.settings.minimizeToTray,
         roomCodeUi
       };
     })()`,
@@ -270,10 +282,13 @@ async function runSmokeCheck(
       serverInstanceId?: unknown;
     };
     persistedTarget: { host?: unknown; port?: unknown; security?: unknown };
+    defaultMinimizeToTray: unknown;
     roomCodeUi: {
       visible?: unknown;
       displayedCode?: unknown;
       hasCopyButton?: unknown;
+      compactInTopbar?: unknown;
+      largeInviteBannerAbsent?: unknown;
     };
   };
   await new Promise<void>((resolve, reject) => {
@@ -297,7 +312,7 @@ async function runSmokeCheck(
             '[data-ui="connection-management"]'
           );
           const displayedCode = document
-            .querySelector('[data-ui="host-room-code"] code')
+            .querySelector('[data-ui="room-code-copy"] code')
             ?.textContent?.trim();
           if (button && displayedCode === roomCode) {
             resolve(button);
@@ -321,16 +336,24 @@ async function runSmokeCheck(
           if (
             control &&
             control.textContent?.includes(roomCode) &&
-            control.querySelectorAll('input[type="password"]').length === 2
+            control.querySelectorAll('input[type="password"]').length === 2 &&
+            control.querySelector('[data-ui="actual-host-close-room"]')
           ) {
-            resolve({ visible: true, hasTwoPasswordInputs: true });
+            resolve({
+              visible: true,
+              hasTwoPasswordInputs: true,
+              hasCloseRoomAction: true
+            });
             return;
           }
           if (Date.now() >= deadline) {
             resolve({
               visible: false,
               hasTwoPasswordInputs:
-                control?.querySelectorAll('input[type="password"]').length === 2
+                control?.querySelectorAll('input[type="password"]').length === 2,
+              hasCloseRoomAction: Boolean(
+                control?.querySelector('[data-ui="actual-host-close-room"]')
+              )
             });
             return;
           }
@@ -401,6 +424,7 @@ async function runSmokeCheck(
     passwordControlUi: {
       visible?: unknown;
       hasTwoPasswordInputs?: unknown;
+      hasCloseRoomAction?: unknown;
     };
     rejectedJoinMessage: unknown;
     joinFailureDiagnostic: unknown;
@@ -446,6 +470,87 @@ async function runSmokeCheck(
     taggedNicknames: rotatedNicknames,
     uniqueNicknames: new Set(rotatedNicknames).size === rotatedNicknames.length
   };
+  const closedRoomUi = (await window.webContents.executeJavaScript(
+    `(async () => {
+      document.querySelector('button[aria-label="关闭诊断"]')?.click();
+      const connectionButton = document.querySelector(
+        '[data-ui="connection-management"]'
+      );
+      connectionButton?.click();
+      const closeButton = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const button = document.querySelector(
+            '[data-ui="actual-host-close-room"]'
+          );
+          if (button || Date.now() >= deadline) {
+            resolve(button);
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
+      const previousConfirm = window.confirm;
+      window.confirm = () => true;
+      closeButton?.click();
+      window.confirm = previousConfirm;
+      const result = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = async () => {
+          const homeVisible = Boolean(document.querySelector('[data-ui="home"]'));
+          const roomCodeHidden =
+            document.querySelector('[data-ui="room-code-copy"]') === null;
+          if ((homeVisible && roomCodeHidden) || Date.now() >= deadline) {
+            const bootstrap = await window.drawGuessDesktop.bootstrap();
+            resolve({
+              closeActionVisible: Boolean(closeButton),
+              homeVisible,
+              roomCodeHidden,
+              serverStillRunning: bootstrap.server.state === "running"
+            });
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        void inspect();
+      });
+      return result;
+    })()`,
+    true
+  )) as {
+    closeActionVisible?: unknown;
+    homeVisible?: unknown;
+    roomCodeHidden?: unknown;
+    serverStillRunning?: unknown;
+  };
+  const closedRoomJoinResponse =
+    typeof autoLocalCreate.roomCode === "string" &&
+    autoLocalCreate.target.host === "127.0.0.1" &&
+    typeof autoLocalCreate.target.port === "number"
+      ? await fetch(
+          `http://127.0.0.1:${String(
+            autoLocalCreate.target.port
+          )}/api/desktop/rooms/${encodeURIComponent(autoLocalCreate.roomCode)}/join`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Draw-Guess-Client": "desktop",
+              "X-Draw-Guess-Protocol": String(PROTOCOL_VERSION)
+            },
+            body: JSON.stringify({
+              roomCode: autoLocalCreate.roomCode,
+              nickname: "Closed Room Probe",
+              password: "rotated-smoke-password"
+            })
+          }
+        )
+      : null;
+  const closedRoom = {
+    ...closedRoomUi,
+    joinStatus: closedRoomJoinResponse?.status ?? null
+  };
   writeFileSync(
     resultPath,
     `${JSON.stringify(
@@ -482,10 +587,14 @@ async function runSmokeCheck(
           autoLocalCreate.roomCodeUi.visible === true &&
           autoLocalCreate.roomCodeUi.displayedCode === autoLocalCreate.roomCode &&
           autoLocalCreate.roomCodeUi.hasCopyButton === true &&
+          autoLocalCreate.roomCodeUi.compactInTopbar === true &&
+          autoLocalCreate.roomCodeUi.largeInviteBannerAbsent === true &&
+          autoLocalCreate.defaultMinimizeToTray === false &&
           typeof autoLocalCreate.selfNickname === "string" &&
           /#\d{4}$/u.test(autoLocalCreate.selfNickname) &&
           hostRoomRuntime.passwordControlUi.visible === true &&
           hostRoomRuntime.passwordControlUi.hasTwoPasswordInputs === true &&
+          hostRoomRuntime.passwordControlUi.hasCloseRoomAction === true &&
           typeof hostRoomRuntime.rejectedJoinMessage === "string" &&
           hostRoomRuntime.rejectedJoinMessage.includes("房间密码错误") &&
           hostRoomRuntime.rejectedJoinMessage.includes("房主可能刚刚修改过密码") &&
@@ -499,6 +608,11 @@ async function runSmokeCheck(
             /#\d{4}$/u.test(nickname)
           ) &&
           rotatedPassword.uniqueNicknames &&
+          closedRoom.closeActionVisible === true &&
+          closedRoom.homeVisible === true &&
+          closedRoom.roomCodeHidden === true &&
+          closedRoom.serverStillRunning === true &&
+          closedRoom.joinStatus === 404 &&
           JSON.stringify(autoLocalCreate.persistedTarget) ===
             JSON.stringify(autoLocalCreate.target),
         protocolVersion: PROTOCOL_VERSION,
@@ -511,6 +625,7 @@ async function runSmokeCheck(
         autoLocalCreate,
         hostRoomRuntime,
         rotatedPassword,
+        closedRoom,
         theme: {
           status: theme.status,
           runtime: themeRuntime,

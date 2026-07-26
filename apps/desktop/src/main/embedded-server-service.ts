@@ -194,6 +194,12 @@ export class EmbeddedServerService {
     this.#logger.info("房间密码已由实际主机更新", { roomCode });
   }
 
+  closeRoom(roomCode: string): void {
+    const running = this.#requireRunning();
+    running.service.closeRoomFromEmbeddedHost(this.#hostControlKey, roomCode);
+    this.#logger.info("房间已由实际主机关闭", { roomCode });
+  }
+
   async revalidateReplay(): Promise<ReplayHostCapability> {
     return this.#requireRunning().service.revalidateReplayFromEmbeddedHost(
       this.#hostControlKey,

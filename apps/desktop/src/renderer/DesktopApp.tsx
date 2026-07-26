@@ -147,6 +147,7 @@ function ConnectionPanel({
   onRefreshNetworks,
   roomCode,
   onChangeRoomPassword,
+  onCloseRoom,
   platform
 }: {
   open: boolean;
@@ -163,6 +164,7 @@ function ConnectionPanel({
   onRefreshNetworks: () => Promise<void>;
   roomCode: string | null;
   onChangeRoomPassword: (roomCode: string, password: string) => Promise<void>;
+  onCloseRoom: (roomCode: string) => Promise<void>;
   platform: Bootstrap["platform"];
 }) {
   const [port, setPort] = useState(settings.hostPort);
@@ -552,6 +554,29 @@ function ConnectionPanel({
               {busy ? "正在更新…" : "更新房间密码"}
             </button>
             <small>密码仅在主机内存中以摘要保存，不会写入桌面设置或诊断日志。</small>
+            <div className="room-close-zone">
+              <div>
+                <strong>结束当前房间</strong>
+                <p>全部玩家会收到关闭原因并返回主界面；内置服务保持运行。</p>
+              </div>
+              <button
+                className="danger-button"
+                data-ui="actual-host-close-room"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `确定关闭房间 ${roomCode} 吗？全部玩家都会断开并返回主界面。`
+                    )
+                  ) {
+                    void run(() => onCloseRoom(roomCode));
+                  }
+                }}
+                type="button"
+              >
+                {busy ? "正在关闭…" : "关闭房间并返回主界面"}
+              </button>
+            </div>
           </form>
         )}
         {message && <p className="panel-message">{message}</p>}
@@ -714,7 +739,7 @@ function SettingsPanel({
               }
               type="checkbox"
             />
-            关闭主窗口时最小化到托盘
+            关闭主窗口时保持在托盘运行（默认关闭）
           </label>
           <label className="check-row">
             <input
@@ -1172,6 +1197,7 @@ export function DesktopApp() {
   const [snapshot, setSnapshot] = useState<PublicRoomSnapshot | null>(null);
   const [capture, setCapture] = useState<CaptureSummary>(EMPTY_CAPTURE);
   const [panel, setPanel] = useState<DesktopPanel>(null);
+  const [gameViewEpoch, setGameViewEpoch] = useState(0);
   const [homeEntryMode, setHomeEntryMode] = useState<"create" | "join">("create");
   const [joinTarget, setJoinTarget] = useState<ConnectionTargetDraft>(
     draftFromTarget({ host: "127.0.0.1", port: 3000, security: "http" })
@@ -1343,11 +1369,26 @@ export function DesktopApp() {
     setSettings(refreshed.settings);
     setPermission(refreshed.permission);
     setTheme(refreshed.theme);
+    if (restart) {
+      setSnapshot(null);
+      setPanel(null);
+      setGameViewEpoch((current) => current + 1);
+    }
   };
 
   const stopServer = async () => {
     setServerStatus(await window.drawGuessDesktop.server.stop());
     setSnapshot(null);
+    setPanel(null);
+    setGameViewEpoch((current) => current + 1);
+  };
+
+  const closeRoom = async (roomCode: string) => {
+    await window.drawGuessDesktop.server.closeRoom(roomCode);
+    setHomeEntryMode("create");
+    setSnapshot(null);
+    setPanel(null);
+    setGameViewEpoch((current) => current + 1);
   };
 
   const finishOnboarding = async (startLocal: boolean) => {
@@ -1374,6 +1415,7 @@ export function DesktopApp() {
     setTheme(refreshed.theme);
     setSnapshot(null);
     setPanel(null);
+    setGameViewEpoch((current) => current + 1);
   };
 
   if (fatalError) {
@@ -1453,7 +1495,9 @@ export function DesktopApp() {
               recentConnections={settings.recentConnections}
             />
           }
-          key={normalizeConnectionTarget(settings.currentClientTarget).origin}
+          key={`${normalizeConnectionTarget(settings.currentClientTarget).origin}:${String(
+            gameViewEpoch
+          )}`}
           lobbyAddon={
             <>
               {captureCard}
@@ -1505,6 +1549,7 @@ export function DesktopApp() {
           onChangeRoomPassword={(roomCode, password) =>
             window.drawGuessDesktop.server.changeRoomPassword(roomCode, password)
           }
+          onCloseRoom={closeRoom}
           open={visiblePanel === "connection"}
           roomCode={hostControls && snapshot ? snapshot.roomCode : null}
           settings={settings}

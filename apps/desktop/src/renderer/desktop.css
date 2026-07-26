@@ -160,6 +160,26 @@ body:has(.sharing-overlay) {
   grid-column: 1 / -1;
 }
 
+.room-close-zone {
+  display: flex;
+  margin-top: 0.25rem;
+  padding-top: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 2px solid var(--line);
+  gap: 1rem;
+}
+
+.room-close-zone p {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.room-close-zone .danger-button {
+  flex: 0 0 auto;
+}
+
 .control-card {
   display: grid;
   padding: 1.2rem;
@@ -1291,6 +1311,11 @@ body:has(.sharing-overlay) {
 @media (max-width: 680px) {
   :root {
     --desktop-panel-width: 100vw;
+  }
+
+  .room-close-zone {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .desktop-dock {
