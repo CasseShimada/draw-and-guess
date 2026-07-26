@@ -555,7 +555,9 @@ async function runSmokeCheck(
               : [];
             resolve({
               visible: Boolean(panel),
-              wideLayout: Boolean(bounds) && bounds.width >= 950,
+              wideLayout:
+                Boolean(bounds) &&
+                bounds.width >= Math.min(950, window.innerWidth - 220),
               twoReadableColumns: columnTracks.length === 2,
               descriptionFontSize: description
                 ? Number.parseFloat(getComputedStyle(description).fontSize)
