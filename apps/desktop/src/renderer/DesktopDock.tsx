@@ -105,6 +105,7 @@ export function DesktopControlCenterNav({
         <button
           aria-selected={activePanel === "capture"}
           className={activePanel === "capture" ? "active" : ""}
+          data-ui="capture-management"
           onClick={() => onSelect("capture")}
           role="tab"
           type="button"
@@ -123,6 +124,7 @@ export function DesktopControlCenterNav({
         <button
           aria-selected={activePanel === "settings"}
           className={activePanel === "settings" ? "active" : ""}
+          data-ui="desktop-preferences"
           onClick={() => onSelect("settings")}
           role="tab"
           type="button"
@@ -138,6 +140,7 @@ export function DesktopControlCenterNav({
         <button
           aria-selected={activePanel === "diagnostics"}
           className={activePanel === "diagnostics" ? "active" : ""}
+          data-ui="desktop-diagnostics"
           onClick={() => onSelect("diagnostics")}
           role="tab"
           type="button"

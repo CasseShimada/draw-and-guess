@@ -55,6 +55,9 @@ describe("desktop dock access", () => {
 
     expect(html).toContain('aria-label="桌面控制中心分区"');
     expect(html).toContain('data-ui="connection-management"');
+    expect(html).toContain('data-ui="capture-management"');
+    expect(html).toContain('data-ui="desktop-preferences"');
+    expect(html).toContain('data-ui="desktop-diagnostics"');
     expect(html).toContain(">联机</strong>");
     expect(html).toContain(">采集</strong>");
     expect(html).toContain(">偏好设置</strong>");

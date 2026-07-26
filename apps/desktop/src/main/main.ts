@@ -176,8 +176,19 @@ async function runSmokeCheck(
   )) as Record<string, unknown>;
   const captureUi = (await window.webContents.executeJavaScript(
     `(async () => {
-      const captureButton = [...document.querySelectorAll(".desktop-toolbar button")]
-        .find((button) => button.textContent?.trim() === "采集");
+      document.querySelector('[data-ui="desktop-control-center-trigger"]')?.click();
+      const captureButton = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const button = document.querySelector('[data-ui="capture-management"]');
+          if (button || Date.now() >= deadline) {
+            resolve(button);
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
       captureButton?.click();
       const panel = await new Promise((resolve) => {
         const deadline = Date.now() + 5_000;
@@ -487,16 +498,35 @@ async function runSmokeCheck(
     `(async () => {
       const roomCode = ${JSON.stringify(autoLocalCreate.roomCode)};
       const target = ${JSON.stringify(autoLocalCreate.target)};
+      const controlCenterTrigger = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const button = document.querySelector(
+            '[data-ui="desktop-control-center-trigger"]'
+          );
+          const displayedCode = document
+            .querySelector('[data-ui="room-code-copy"] code')
+            ?.textContent?.trim();
+          if (button && displayedCode === roomCode) {
+            resolve(button);
+            return;
+          }
+          if (Date.now() >= deadline) {
+            resolve(null);
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
+      controlCenterTrigger?.click();
       const connectionButton = await new Promise((resolve) => {
         const deadline = Date.now() + 5_000;
         const inspect = () => {
           const button = document.querySelector(
             '[data-ui="connection-management"]'
           );
-          const displayedCode = document
-            .querySelector('[data-ui="room-code-copy"] code')
-            ?.textContent?.trim();
-          if (button && displayedCode === roomCode) {
+          if (button) {
             resolve(button);
             return;
           }
@@ -599,9 +629,7 @@ async function runSmokeCheck(
           .reverse()
           .find((entry) => entry.message.startsWith("加入房间失败"))?.message ??
         null;
-      [...document.querySelectorAll(".desktop-toolbar button")]
-        .find((button) => button.textContent?.trim() === "诊断")
-        ?.click();
+      document.querySelector('[data-ui="desktop-diagnostics"]')?.click();
       const joinFailureDiagnosticUi = await new Promise((resolve) => {
         const deadline = Date.now() + 5_000;
         const inspect = () => {
@@ -766,9 +794,21 @@ async function runSmokeCheck(
   const closedRoomUi = (await window.webContents.executeJavaScript(
     `(async () => {
       document.querySelector('button[aria-label="关闭诊断"]')?.click();
-      const connectionButton = document.querySelector(
-        '[data-ui="connection-management"]'
-      );
+      document.querySelector('[data-ui="desktop-control-center-trigger"]')?.click();
+      const connectionButton = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const button = document.querySelector(
+            '[data-ui="connection-management"]'
+          );
+          if (button || Date.now() >= deadline) {
+            resolve(button);
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
       connectionButton?.click();
       const closeButton = await new Promise((resolve) => {
         const deadline = Date.now() + 5_000;
