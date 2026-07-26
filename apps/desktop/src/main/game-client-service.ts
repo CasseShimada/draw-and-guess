@@ -419,6 +419,34 @@ export class GameClientService {
     return Promise.resolve();
   }
 
+  async leaveRoom(): Promise<void> {
+    const token = this.#token;
+    this.#manualDisconnect = true;
+    let failure: Error | null = null;
+    try {
+      if (token) {
+        await this.#rawRequest("/api/session", {
+          method: "DELETE",
+          token,
+          timeoutMs: 2_500
+        });
+      }
+    } catch (error) {
+      failure =
+        error instanceof Error ? error : new Error("主动退出房间时发生未知错误");
+      this.#logger.warn("主动退出房间未能送达服务器", {
+        message: failure.message
+      });
+    } finally {
+      await this.disconnect();
+      await this.#settings.clearSession(this.#target);
+      this.#token = null;
+    }
+    if (failure) {
+      throw failure;
+    }
+  }
+
   async clearSession(): Promise<void> {
     await this.disconnect();
     await this.#settings.clearSession(this.#target);
@@ -577,6 +605,7 @@ export class GameClientService {
       token?: string;
       contentType?: string;
       allowNotFound?: boolean;
+      timeoutMs?: number;
     }
   ): Promise<Response> {
     const epoch = this.#epoch;
@@ -596,7 +625,10 @@ export class GameClientService {
           ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
         },
         ...(options.body ? { body: options.body } : {}),
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(options.timeoutMs ?? 10_000)
+        ]),
         redirect: "error"
       });
     } finally {

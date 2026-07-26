@@ -23,7 +23,9 @@ async function desktopSource(relativePath: string): Promise<string> {
 
 describe("public theme selector API", () => {
   it("keeps the global platform, screen, mode, phase, and connection hooks", async () => {
-    const app = await source("App.tsx");
+    const app = (
+      await Promise.all([source("App.tsx"), source("components/AppShell.tsx")])
+    ).join("\n");
     for (const hook of [
       'data-ui={embedded ? "app-root" : "theme-root"}',
       "data-platform={platform}",
@@ -40,6 +42,8 @@ describe("public theme selector API", () => {
   it("keeps major home, lobby, room settings, and game component hooks", async () => {
     const files = await Promise.all([
       source("App.tsx"),
+      source("components/AppShell.tsx"),
+      source("components/HomeActions.tsx"),
       source("RoomSettingsScreen.tsx"),
       source("modes/common.tsx"),
       source("modes/classic/ClassicModeView.tsx"),
@@ -70,6 +74,8 @@ describe("public theme selector API", () => {
   it("does not hard-code ordinary colors, borders, or shadows in React style props", async () => {
     const files = await Promise.all([
       source("App.tsx"),
+      source("components/AppShell.tsx"),
+      source("components/HomeActions.tsx"),
       source("AvatarEditor.tsx"),
       source("PlayerAvatar.tsx"),
       source("RoomSettingsScreen.tsx"),
@@ -108,5 +114,21 @@ describe("public theme selector API", () => {
     expect(windowManager.indexOf("insertCSS(css")).toBeLessThan(
       windowManager.indexOf("removeInsertedCSS(previousKey)")
     );
+  });
+
+  it("keeps gallery images contained and only exposes theme recovery on an alert", async () => {
+    const [gallery, css, safetyHost] = await Promise.all([
+      source("modes/reference-copy/ReferenceCopyModeView.tsx"),
+      source("theme/default-template.css"),
+      desktopSource("renderer/theme/ThemeSafetyHost.tsx")
+    ]);
+
+    expect(gallery).toContain('data-winner={winner ? "true" : "false"}');
+    expect(css).toContain(".gallery-grid article img");
+    expect(css).toContain("max-width: 100%");
+    expect(css).toContain("object-fit: contain");
+    expect(safetyHost).toContain("{hasAlert && (");
+    expect(safetyHost).toContain("主题修复");
+    expect(safetyHost).not.toContain('{hasAlert ? "主题修复" : "主题"}');
   });
 });

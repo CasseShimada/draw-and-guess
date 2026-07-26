@@ -424,6 +424,59 @@ export class GameService {
     this.broadcastSnapshots(room);
   }
 
+  leaveRoom(access: RoomAccess): void {
+    const { room, player } = access;
+    if (
+      this.rooms.get(room.roomCode) !== room ||
+      room.players.get(player.id) !== player
+    ) {
+      throw new GameError(ErrorCode.UNAUTHORIZED, "房间会话已失效", 401);
+    }
+    if (room.hostId === player.id) {
+      this.destroyRoom(room.roomCode, "host-closed");
+      return;
+    }
+
+    const socket = player.socket;
+    this.#revokeCapture(room, player.id, "permission-revoked", true, "user-stopped");
+    this.#clearPlayerFrameDrain(player);
+    player.socket = null;
+    player.clientKind = null;
+    player.captureReady = false;
+    player.uploadGrant = null;
+    player.lastFrameAt = null;
+    player.avatar = null;
+    room.lastActivityAt = this.#now();
+
+    this.#registry
+      .controller(room.modeRuntime.mode)
+      .onPlayerConnectionChanged(this.#context(room), player.id);
+    room.players.delete(player.id);
+    this.sessions.removePlayer(room.roomCode, player.id);
+    for (const windows of [
+      this.#chatWindows,
+      this.#avatarWindows,
+      this.#referenceUploadWindows
+    ]) {
+      windows.delete(`${room.roomCode}:${player.id}`);
+    }
+    for (const key of room.processedCommandIds.keys()) {
+      if (key.startsWith(`${player.id}:`)) {
+        room.processedCommandIds.delete(key);
+      }
+    }
+    this.#appendChat(room, {
+      kind: "system",
+      playerId: null,
+      nickname: null,
+      text: `${player.nickname} 已退出房间`
+    });
+    this.broadcastSnapshots(room);
+    if (this.#isOpen(socket)) {
+      socket.close(1000, "已退出房间");
+    }
+  }
+
   setCaptureReady(
     roomCode: string,
     playerId: string,

@@ -527,20 +527,6 @@ export function DrawRelayModeView({
           )}
         {!hostControls?.replay && <p>回放保存在实际主机电脑，请向房主手动索取。</p>}
       </section>
-      {isHost && (
-        <button
-          className="primary-button"
-          data-action="return-to-lobby"
-          data-critical-kind="action"
-          data-critical-label="返回接龙模式大厅"
-          data-critical-ui="return-relay-lobby"
-          data-ui="primary-button"
-          onClick={() => send({ type: "game:return-lobby" })}
-          type="button"
-        >
-          返回接龙大厅
-        </button>
-      )}
     </main>
   );
 }

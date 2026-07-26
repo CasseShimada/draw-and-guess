@@ -540,20 +540,6 @@ export function ReferenceCopyModeView({
         ))}
         {gallery?.entries.length === 0 && <p>本局没有有效作品。</p>}
       </section>
-      {isHost && (
-        <button
-          className="primary-button"
-          data-action="return-to-lobby"
-          data-critical-kind="action"
-          data-critical-label="返回临摹模式大厅"
-          data-critical-ui="return-reference-lobby"
-          data-ui="primary-button"
-          onClick={() => send({ type: "game:return-lobby" })}
-          type="button"
-        >
-          返回临摹大厅
-        </button>
-      )}
     </main>
   );
 }
@@ -573,7 +559,10 @@ function GalleryItem({
 }) {
   const asset = useAssetUrl(path, loadAsset);
   return (
-    <article className={winner ? "gallery-item gallery-item--winner" : "gallery-item"}>
+    <article
+      className={winner ? "gallery-item gallery-item--winner" : "gallery-item"}
+      data-winner={winner ? "true" : "false"}
+    >
       {asset.url && <img alt={`${author} 的临摹作品`} src={asset.url} />}
       <strong>{author}</strong>
       <span>{likes} 赞</span>

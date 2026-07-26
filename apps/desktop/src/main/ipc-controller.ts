@@ -494,6 +494,10 @@ export function registerIpcHandlers(services: IpcServices): () => void {
       services.gameClient.getAvatar(roomCode, playerId, revision)
   );
 
+  handle(IPC_CHANNELS.gameLeaveRoom, z.undefined(), z.void(), async () =>
+    services.gameClient.leaveRoom()
+  );
+
   handle(IPC_CHANNELS.gameDisconnect, z.undefined(), z.void(), async () =>
     services.gameClient.disconnect()
   );

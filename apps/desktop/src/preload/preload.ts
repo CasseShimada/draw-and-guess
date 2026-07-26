@@ -301,6 +301,9 @@ const bridge: DesktopBridge = {
         BinaryValueSchema.nullable(),
         { roomCode, playerId, revision }
       ),
+    leaveRoom: async () => {
+      await invoke(IPC_CHANNELS.gameLeaveRoom, z.undefined(), z.void(), undefined);
+    },
     disconnect: async () => {
       await invoke(IPC_CHANNELS.gameDisconnect, z.undefined(), z.void(), undefined);
     },

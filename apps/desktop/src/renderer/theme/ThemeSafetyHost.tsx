@@ -374,15 +374,17 @@ export function ThemeSafetyHost({
           </div>
         </section>
       )}
-      <button
-        aria-expanded={open}
-        className="launcher"
-        data-alert={hasAlert ? "true" : "false"}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-      >
-        {hasAlert ? "主题修复" : "主题"}
-      </button>
+      {hasAlert && (
+        <button
+          aria-expanded={open}
+          className="launcher"
+          data-alert="true"
+          onClick={() => setOpen((current) => !current)}
+          type="button"
+        >
+          主题修复
+        </button>
+      )}
     </>,
     shadow
   );

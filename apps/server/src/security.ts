@@ -118,6 +118,14 @@ export class SessionStore {
     }
   }
 
+  removePlayer(roomCode: string, playerId: string): void {
+    for (const [digest, session] of this.#sessions) {
+      if (session.roomCode === roomCode && session.playerId === playerId) {
+        this.#sessions.delete(digest);
+      }
+    }
+  }
+
   cleanup(now: number): void {
     for (const [digest, session] of this.#sessions) {
       if (session.expiresAt <= now) {

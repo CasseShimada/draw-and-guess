@@ -61,6 +61,7 @@ export const IPC_CHANNELS = {
   gameResume: "game:resume",
   gameSend: "game:send",
   gameUploadFrame: "game:upload-frame",
+  gameLeaveRoom: "game:leave-room",
   gameDisconnect: "game:disconnect",
   gameWordPoolUpload: "game:word-pool:upload",
   gameReferenceUpload: "game:reference:upload",
@@ -670,6 +671,7 @@ export interface DesktopBridge {
       playerId: string,
       revision: string
     ): Promise<Uint8Array | null>;
+    leaveRoom(): Promise<void>;
     disconnect(): Promise<void>;
     onEvent(listener: (event: GameEvent) => void): () => void;
   };

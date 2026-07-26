@@ -322,20 +322,6 @@ export function ClassicModeView({
           </div>
         ))}
       </section>
-      {isHost && (
-        <button
-          className="primary-button"
-          data-action="return-to-lobby"
-          data-critical-kind="action"
-          data-critical-label="返回经典模式大厅"
-          data-critical-ui="return-classic-lobby"
-          data-ui="primary-button"
-          onClick={() => send({ type: "game:return-lobby" })}
-          type="button"
-        >
-          返回经典模式大厅
-        </button>
-      )}
     </main>
   );
 }

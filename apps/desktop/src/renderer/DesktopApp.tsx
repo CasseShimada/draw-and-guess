@@ -28,6 +28,8 @@ import {
   type ConnectionTargetDraft
 } from "./ConnectionTargetEditor.js";
 import {
+  CaptureStatusCard,
+  DesktopControlCenterNav,
   DesktopDock,
   canManageConnectionPanel,
   visibleDesktopPanel,
@@ -1199,8 +1201,8 @@ function SettingsPanel({
           </div>
           <small>
             直接编辑工作目录中的 source.css 后点击“重新载入 CSS”。失败时 compiled.css
-            与当前可用主题保持不变。右下角 Shadow DOM 安全中心和
-            独立共享停止入口永远不受主题影响。
+            与当前可用主题保持不变。主题异常时出现的 Shadow DOM 修复入口和独立共享
+            停止入口永远不受主题影响。
           </small>
           <ThemePreview />
         </section>
@@ -1442,6 +1444,7 @@ export function DesktopApp() {
       deleteAvatar: (roomCode) => window.drawGuessDesktop.game.deleteAvatar(roomCode),
       getAvatar: (roomCode, playerId, revision) =>
         window.drawGuessDesktop.game.getAvatar(roomCode, playerId, revision),
+      leaveRoom: () => window.drawGuessDesktop.game.leaveRoom(),
       onEvent: (listener) =>
         window.drawGuessDesktop.game.onEvent((event) => listener(event))
     };
@@ -1582,35 +1585,6 @@ export function DesktopApp() {
     );
   }
 
-  const captureCard = (
-    <section className="panel desktop-capture-card">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">Desktop capture</p>
-          <h2>{capture.ready ? "采集已准备" : "准备外部画布"}</h2>
-        </div>
-        <span className={`step-pill ${capture.active ? "step-pill--live" : ""}`}>
-          {capture.active ? "正在共享" : capture.ready ? "可成为画手" : "仅猜词"}
-        </span>
-      </div>
-      <div className="desktop-capture-card__body">
-        <p>
-          {capture.error ??
-            (capture.sourceName
-              ? `已选择：${capture.sourceName}`
-              : "选择外部绘图窗口，预览并裁切后确认。未确认时不会进入画手队列。")}
-        </p>
-        <button
-          className="secondary-button"
-          onClick={() => setPanel("capture")}
-          type="button"
-        >
-          {capture.ready ? "检查采集与裁切" : "打开采集工作室"}
-        </button>
-      </div>
-    </section>
-  );
-
   return (
     <div className="desktop-root">
       <DefaultDesktopThemeStyle
@@ -1651,7 +1625,15 @@ export function DesktopApp() {
           key={`${normalizeConnectionTarget(settings.currentClientTarget).origin}:${String(
             gameViewEpoch
           )}`}
-          lobbyAddon={<>{captureCard}</>}
+          lobbyAddon={
+            <CaptureStatusCard
+              active={capture.active}
+              error={capture.error}
+              onOpen={() => setPanel("capture")}
+              ready={capture.ready}
+              sourceName={capture.sourceName}
+            />
+          }
           notificationsEnabled={settings.notificationsEnabled}
           onSnapshot={setSnapshot}
           topbarAddon={
@@ -1660,8 +1642,12 @@ export function DesktopApp() {
               captureActive={capture.active}
               captureReady={capture.ready}
               connectionManagementAvailable={connectionManagementAvailable}
-              onToggle={(nextPanel) =>
-                setPanel((current) => (current === nextPanel ? null : nextPanel))
+              onOpen={() =>
+                setPanel(
+                  (current) =>
+                    current ??
+                    (connectionManagementAvailable ? "connection" : "capture")
+                )
               }
               serverState={serverStatus.state}
             />
@@ -1671,62 +1657,88 @@ export function DesktopApp() {
           transport={transport}
         />
 
-        {visiblePanel && visiblePanel !== "capture" && (
+        {visiblePanel && (
           <button
-            aria-label="关闭桌面控制面板"
+            aria-label="关闭桌面控制中心"
             className="desktop-panel-backdrop"
-            data-action="close-desktop-panel"
+            data-action="close-desktop-control-center"
             data-ui="desktop-panel-backdrop"
             onClick={() => setPanel(null)}
             type="button"
           />
         )}
-        {connectionManagementAvailable && (
-          <ConnectionPanel
-            onClose={() => setPanel(null)}
-            onSettings={updateSettings}
-            onStart={startServer}
-            onStop={stopServer}
-            onRefreshNetworks={async () => {
-              setServerStatus(await window.drawGuessDesktop.server.refreshNetworks());
-            }}
-            onChangeRoomPassword={(roomCode, password) =>
-              window.drawGuessDesktop.server.changeRoomPassword(roomCode, password)
-            }
-            onCloseRoom={closeRoom}
-            open={visiblePanel === "connection"}
-            roomCode={hostControls && snapshot ? snapshot.roomCode : null}
-            settings={settings}
-            status={serverStatus}
-            platform={bootstrap.platform}
-          />
-        )}
-        <CaptureStudio
-          onClose={() => setPanel(null)}
-          onSettingsChange={setSettings}
-          onSummary={setCapture}
-          open={visiblePanel === "capture"}
-          settings={settings}
-          snapshot={snapshot}
-        />
-        <SettingsPanel
-          bootstrap={bootstrap}
-          onClose={() => setPanel(null)}
-          onRefreshPermission={async () => {
-            setPermission(await window.drawGuessDesktop.capture.permission());
-          }}
-          onReset={resetLocalData}
-          onSettings={updateSettings}
-          onThemeChange={setTheme}
-          open={visiblePanel === "settings"}
-          permission={permission}
-          settings={settings}
-          theme={theme}
-        />
-        <DiagnosticsPanel
-          onClose={() => setPanel(null)}
-          open={visiblePanel === "diagnostics"}
-        />
+        <section
+          aria-hidden={visiblePanel === null}
+          aria-label="桌面控制中心"
+          aria-modal={visiblePanel === null ? undefined : true}
+          className={`desktop-control-center ${
+            visiblePanel ? "desktop-control-center--open" : ""
+          }`}
+          data-ui="desktop-control-center"
+          hidden={visiblePanel === null}
+          role={visiblePanel === null ? undefined : "dialog"}
+        >
+          {visiblePanel && (
+            <DesktopControlCenterNav
+              activePanel={visiblePanel}
+              captureActive={capture.active}
+              captureReady={capture.ready}
+              connectionManagementAvailable={connectionManagementAvailable}
+              onSelect={setPanel}
+              serverState={serverStatus.state}
+            />
+          )}
+          <div className="desktop-control-center__content">
+            {connectionManagementAvailable && (
+              <ConnectionPanel
+                onClose={() => setPanel(null)}
+                onSettings={updateSettings}
+                onStart={startServer}
+                onStop={stopServer}
+                onRefreshNetworks={async () => {
+                  setServerStatus(
+                    await window.drawGuessDesktop.server.refreshNetworks()
+                  );
+                }}
+                onChangeRoomPassword={(roomCode, password) =>
+                  window.drawGuessDesktop.server.changeRoomPassword(roomCode, password)
+                }
+                onCloseRoom={closeRoom}
+                open={visiblePanel === "connection"}
+                roomCode={hostControls && snapshot ? snapshot.roomCode : null}
+                settings={settings}
+                status={serverStatus}
+                platform={bootstrap.platform}
+              />
+            )}
+            <CaptureStudio
+              onClose={() => setPanel(null)}
+              onSettingsChange={setSettings}
+              onSummary={setCapture}
+              open={visiblePanel === "capture"}
+              settings={settings}
+              snapshot={snapshot}
+            />
+            <SettingsPanel
+              bootstrap={bootstrap}
+              onClose={() => setPanel(null)}
+              onRefreshPermission={async () => {
+                setPermission(await window.drawGuessDesktop.capture.permission());
+              }}
+              onReset={resetLocalData}
+              onSettings={updateSettings}
+              onThemeChange={setTheme}
+              open={visiblePanel === "settings"}
+              permission={permission}
+              settings={settings}
+              theme={theme}
+            />
+            <DiagnosticsPanel
+              onClose={() => setPanel(null)}
+              open={visiblePanel === "diagnostics"}
+            />
+          </div>
+        </section>
 
         {!settings.onboardingComplete && (
           <Onboarding bootstrap={bootstrap} onComplete={finishOnboarding} />

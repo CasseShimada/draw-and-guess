@@ -228,6 +228,65 @@ describe("HTTP room integration", () => {
     expect(service.rooms.size).toBe(0);
   });
 
+  it("logs out a leaving member immediately and closes the room when the host leaves", async () => {
+    const { app, service } = await createApp({
+      config: TEST_CONFIG,
+      serveStatic: false,
+      startCleanup: false
+    });
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/rooms",
+      payload: { nickname: "房主", password: "secret" }
+    });
+    const roomCode = created.json<{ snapshot: { roomCode: string } }>().snapshot
+      .roomCode;
+    const hostCookie = firstHeader(created.headers["set-cookie"]).split(";")[0]!;
+    const joined = await app.inject({
+      method: "POST",
+      url: `/api/rooms/${roomCode}/join`,
+      payload: { roomCode, nickname: "成员", password: "secret" }
+    });
+    const guestCookie = firstHeader(joined.headers["set-cookie"]).split(";")[0]!;
+
+    const left = await app.inject({
+      method: "DELETE",
+      url: "/api/session",
+      headers: { cookie: guestCookie }
+    });
+    expect(left.statusCode).toBe(204);
+    expect(firstHeader(left.headers["set-cookie"])).toContain("dg_session=");
+    expect(firstHeader(left.headers["set-cookie"])).toContain("Max-Age=0");
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/api/rooms/${roomCode}`,
+          headers: { cookie: hostCookie }
+        })
+      ).json().snapshot.players
+    ).toHaveLength(1);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/session",
+          headers: { cookie: guestCookie }
+        })
+      ).statusCode
+    ).toBe(401);
+
+    const hostLeft = await app.inject({
+      method: "DELETE",
+      url: "/api/session",
+      headers: { cookie: hostCookie }
+    });
+    expect(hostLeft.statusCode).toBe(204);
+    expect(service.rooms.has(roomCode)).toBe(false);
+    await app.close();
+  });
+
   it("accepts empty browser nicknames and returns distinct generated identities", async () => {
     const { app } = await createApp({
       config: TEST_CONFIG,

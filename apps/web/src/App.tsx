@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent,
   type ReactNode
 } from "react";
 
@@ -33,16 +32,22 @@ import type {
 } from "@draw-guess/shared-types";
 
 import { AvatarEditor } from "./AvatarEditor.js";
-import { RoomCodeCopyButton } from "./RoomCodeCopyButton.js";
 import { RoomClosureDialog } from "./RoomClosureDialog.js";
 import { RoomSettingsScreen } from "./RoomSettingsScreen.js";
 import { WordPackManager } from "./WordPackManager.js";
-import { createBrowserContentServices } from "./content-store.js";
 import {
-  GAME_MODE_DESCRIPTIONS,
-  GAME_MODE_LABELS,
-  ModeRenderer
-} from "./modes/registry.js";
+  AppMoreMenu,
+  AppTopBar,
+  ContextActionBar,
+  GameWorkspace,
+  LobbyLayout,
+  LobbyModeSelector,
+  ThemeSurface,
+  type ConnectionState
+} from "./components/AppShell.js";
+import { Home } from "./components/HomeActions.js";
+import { createBrowserContentServices } from "./content-store.js";
+import { GAME_MODE_LABELS, ModeRenderer } from "./modes/registry.js";
 import type { ActualHostControls, GameAsset } from "./modes/types.js";
 import {
   canOpenRoomSettings,
@@ -59,7 +64,7 @@ import {
   type RoomSettingsDraft
 } from "./room-settings-state.js";
 
-type ConnectionState = "connecting" | "connected" | "reconnecting" | "offline";
+export { Home } from "./components/HomeActions.js";
 
 interface ApiErrorBody {
   error?: { message?: string };
@@ -115,6 +120,7 @@ export interface DesktopGameTransport {
     nickname: string,
     password: string
   ): Promise<{ snapshot: PublicRoomSnapshot }>;
+  leaveRoom(): Promise<void>;
   send(message: object): Promise<void>;
   uploadWordPool(
     roomCode: string,
@@ -165,67 +171,6 @@ export interface AppProps {
   themeScreenOverride?: string;
 }
 
-function ThemeSurface({
-  children,
-  connection,
-  embedded,
-  phase,
-  mode,
-  platform,
-  screen
-}: {
-  children: ReactNode;
-  connection: ConnectionState;
-  embedded: boolean;
-  phase?: string;
-  mode?: GameModeId;
-  platform: "web" | "desktop";
-  screen: string;
-}) {
-  const surfaceRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const surface = surfaceRef.current;
-    const root = embedded
-      ? surface?.closest<HTMLElement>('[data-ui="theme-root"]')
-      : surface;
-    if (!root) {
-      return;
-    }
-    root.dataset.platform = platform;
-    root.dataset.screen = screen;
-    root.dataset.connection = connection;
-    if (mode) {
-      root.dataset.mode = mode;
-    } else {
-      delete root.dataset.mode;
-    }
-    if (phase) {
-      root.dataset.phase = phase.toLowerCase();
-    } else {
-      delete root.dataset.phase;
-    }
-  }, [connection, embedded, mode, phase, platform, screen]);
-
-  return (
-    <div
-      className="app-theme-surface"
-      data-connection={connection}
-      data-critical-kind="content"
-      data-critical-label="当前应用页面"
-      data-critical-ui="app-surface"
-      data-mode={mode}
-      data-phase={phase?.toLowerCase()}
-      data-platform={platform}
-      data-screen={screen}
-      data-theme-mode={embedded ? undefined : "default"}
-      data-ui={embedded ? "app-root" : "theme-root"}
-      ref={surfaceRef}
-    >
-      {children}
-    </div>
-  );
-}
-
 const COMMAND_TYPES = new Set([
   "game:start",
   "game:restart",
@@ -259,11 +204,6 @@ const PHASE_LABELS: Record<string, string> = {
 
 function commandId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-}
-
-function formValue(values: FormData, name: string): string {
-  const value = values.get(name);
-  return typeof value === "string" ? value : "";
 }
 
 function requestPartialReplayChoice(
@@ -314,283 +254,6 @@ function websocketUrl(): string {
   )}`;
 }
 
-function StatusDot({ state }: { state: ConnectionState }) {
-  const labels: Record<ConnectionState, string> = {
-    connecting: "正在连接",
-    connected: "已连接",
-    reconnecting: "正在重连",
-    offline: "连接断开"
-  };
-  return (
-    <span
-      className={`connection connection--${state}`}
-      data-state={state}
-      data-ui="connection-status"
-      role="status"
-    >
-      <span className="connection__dot" aria-hidden="true" />
-      {labels[state]}
-    </span>
-  );
-}
-
-export function Home({
-  busy,
-  error,
-  initialEntryMode,
-  joinConnectionControl,
-  topbarAddon,
-  avatarControl,
-  rememberedNickname,
-  onCreate,
-  onJoin,
-  onManageWords
-}: {
-  busy: boolean;
-  error: string | null;
-  initialEntryMode: "create" | "join";
-  joinConnectionControl?: ReactNode;
-  topbarAddon?: ReactNode;
-  avatarControl: ReactNode;
-  rememberedNickname: string | null;
-  onCreate: (nickname: string, password: string) => Promise<void>;
-  onJoin: (roomCode: string, nickname: string, password: string) => Promise<void>;
-  onManageWords: () => void;
-}) {
-  const [entryMode, setEntryMode] = useState<"create" | "join">(initialEntryMode);
-  const [nickname, setNickname] = useState(rememberedNickname ?? "");
-  const nicknameEditedRef = useRef(false);
-  useEffect(() => setEntryMode(initialEntryMode), [initialEntryMode]);
-  useEffect(() => {
-    if (!nicknameEditedRef.current) {
-      setNickname(rememberedNickname ?? "");
-    }
-  }, [rememberedNickname]);
-
-  const submitCreate = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    void onCreate(formValue(values, "nickname"), formValue(values, "password"));
-  };
-  const submitJoin = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    void onJoin(
-      formValue(values, "roomCode"),
-      formValue(values, "nickname"),
-      formValue(values, "password")
-    );
-  };
-
-  return (
-    <main className="home-shell" data-screen="home" data-ui="home-screen">
-      <section className="home-intro" data-ui="home-intro">
-        <div className="brand brand--large">
-          <span className="brand__mark" aria-hidden="true">
-            画
-          </span>
-          <span>
-            <strong>画猜现场</strong>
-            <small>DRAW &amp; GUESS LIVE</small>
-          </span>
-        </div>
-        <div className="home-intro__copy">
-          <p className="eyebrow">三种玩法 · 桌面窗口采集 · 跨平台联机</p>
-          <h1>
-            认真画。
-            <br />
-            放心猜。
-          </h1>
-          <p>
-            经典画猜、同步临摹与私密接龙共用一个房间。桌面端只上传服务器需要的最新画面。
-          </p>
-        </div>
-        <div className="signal-card" aria-label="产品特点">
-          <span>
-            <strong>01</strong> 三种模式
-          </span>
-          <span>
-            <strong>02</strong> 最新帧优先
-          </span>
-          <span>
-            <strong>03</strong> 服务端裁决
-          </span>
-        </div>
-      </section>
-
-      <section className="entry-card" data-ui="room-entry">
-        <div className="home-content-actions">
-          {topbarAddon}
-          <button onClick={onManageWords} type="button">
-            词库管理
-          </button>
-        </div>
-        <div
-          className="entry-tabs"
-          data-ui="entry-tabs"
-          role="tablist"
-          aria-label="进入方式"
-        >
-          <button
-            className={entryMode === "create" ? "active" : ""}
-            onClick={() => setEntryMode("create")}
-            role="tab"
-            type="button"
-          >
-            创建房间
-          </button>
-          <button
-            className={entryMode === "join" ? "active" : ""}
-            onClick={() => setEntryMode("join")}
-            role="tab"
-            type="button"
-          >
-            加入房间
-          </button>
-        </div>
-
-        {entryMode === "create" ? (
-          <form
-            className="entry-form"
-            data-ui="create-room-form"
-            onSubmit={submitCreate}
-          >
-            <div>
-              <p className="eyebrow">成为今晚的主持人</p>
-              <h2>开一个新房间</h2>
-              <p className="muted">房间与参考图只保存在服务器内存中。</p>
-            </div>
-            <label>
-              你的昵称（可留空随机；将添加 #四位数字）
-              <input
-                autoComplete="nickname"
-                data-critical-kind="input"
-                data-critical-label="创建房间昵称"
-                data-critical-ui="create-nickname-input"
-                data-ui="text-input"
-                name="nickname"
-                maxLength={24}
-                onChange={(event) => {
-                  nicknameEditedRef.current = true;
-                  setNickname(event.currentTarget.value);
-                }}
-                placeholder="留空将随机生成"
-                value={nickname}
-              />
-            </label>
-            {avatarControl}
-            <label>
-              房间密码
-              <input
-                data-critical-kind="input"
-                data-critical-label="创建房间密码"
-                data-critical-ui="create-password-input"
-                data-ui="password-input"
-                name="password"
-                minLength={4}
-                maxLength={128}
-                placeholder="至少 4 位"
-                type="password"
-                required
-              />
-            </label>
-            {error && (
-              <p className="form-error" role="alert">
-                {error}
-              </p>
-            )}
-            <button
-              className="primary-button"
-              data-action="create-room"
-              data-critical-kind="action"
-              data-critical-label="创建并进入房间"
-              data-critical-ui="create-room-action"
-              data-ui="primary-button"
-              disabled={busy}
-              type="submit"
-            >
-              {busy ? "正在创建…" : "创建并进入"}
-            </button>
-          </form>
-        ) : (
-          <form className="entry-form" data-ui="join-room-form" onSubmit={submitJoin}>
-            <div>
-              <p className="eyebrow">朋友已经开场？</p>
-              <h2>输入房间连接信息</h2>
-            </div>
-            {joinConnectionControl}
-            <label>
-              六位房间码
-              <input
-                data-critical-kind="input"
-                data-critical-label="六位房间码"
-                data-critical-ui="room-code-input"
-                data-ui="room-code-input"
-                name="roomCode"
-                maxLength={6}
-                minLength={6}
-                placeholder="ABC234"
-                autoCapitalize="characters"
-                required
-              />
-            </label>
-            <label>
-              你的昵称（可留空随机；将添加 #四位数字）
-              <input
-                autoComplete="nickname"
-                data-critical-kind="input"
-                data-critical-label="加入房间昵称"
-                data-critical-ui="join-nickname-input"
-                data-ui="text-input"
-                name="nickname"
-                maxLength={24}
-                onChange={(event) => {
-                  nicknameEditedRef.current = true;
-                  setNickname(event.currentTarget.value);
-                }}
-                placeholder="留空将随机生成"
-                value={nickname}
-              />
-            </label>
-            <label>
-              房间密码
-              <input
-                data-critical-kind="input"
-                data-critical-label="加入房间密码"
-                data-critical-ui="join-password-input"
-                data-ui="password-input"
-                name="password"
-                minLength={4}
-                maxLength={128}
-                type="password"
-                required
-              />
-            </label>
-            {avatarControl}
-            {error && (
-              <p className="form-error" data-ui="join-error" role="alert">
-                {error}
-              </p>
-            )}
-            <button
-              className="primary-button"
-              data-action="join-room"
-              data-critical-kind="action"
-              data-critical-label="加入房间"
-              data-critical-ui="join-room-action"
-              data-ui="primary-button"
-              disabled={busy}
-              type="submit"
-            >
-              {busy ? "正在加入…" : "加入房间"}
-            </button>
-          </form>
-        )}
-      </section>
-    </main>
-  );
-}
-
 function drawingContext(snapshot: PublicRoomSnapshot): string {
   const { game } = snapshot;
   const self = game.selfDrawing;
@@ -613,64 +276,6 @@ function acceptsLiveFrame(snapshot: PublicRoomSnapshot): boolean {
 function knownCaptureSession(snapshot: PublicRoomSnapshot): number | null {
   const drawing = snapshot.game.selfDrawing;
   return drawing && drawing.status !== "finalized" ? drawing.captureSessionId : null;
-}
-
-function PassControls({
-  snapshot,
-  send
-}: {
-  snapshot: PublicRoomSnapshot;
-  send: (message: Record<string, unknown>) => void;
-}) {
-  if (snapshot.passableActors.length === 0) {
-    return null;
-  }
-  const effectText = {
-    "handoff-input": "跳过当前输入并交给下一位",
-    "withdraw-submission": "退出本次临摹且不提交作品",
-    "finalize-current-frame": "立即以服务器已接受的画面定稿",
-    "finish-ballot": "保留已点赞作品并跳过剩余匿名作品"
-  } as const;
-  return (
-    <aside className="pass-controls" data-ui="pass-controls">
-      {snapshot.passableActors.map((actor) => {
-        const player = snapshot.players.find(
-          (candidate) => candidate.id === actor.targetPlayerId
-        );
-        const self = actor.targetPlayerId === snapshot.selfPlayerId;
-        const text = effectText[actor.effect];
-        return (
-          <button
-            className="secondary-button"
-            key={actor.actorStepId}
-            onClick={() => {
-              if (
-                !window.confirm(
-                  `${self ? "你" : (player?.nickname ?? "该玩家")}将${text}。确定 Pass 吗？`
-                )
-              ) {
-                return;
-              }
-              send({
-                type: "turn:pass",
-                modeSessionId: snapshot.modeSessionId,
-                actorStepId: actor.actorStepId,
-                targetPlayerId: actor.targetPlayerId
-              });
-            }}
-            data-action="pass-turn"
-            data-critical-kind="action"
-            data-critical-label={`Pass：${self ? text : (player?.nickname ?? "玩家")}`}
-            data-critical-ui={`pass-${actor.actorStepId}`}
-            data-ui="secondary-button"
-            type="button"
-          >
-            Pass · {self ? text : `${player?.nickname ?? "玩家"}：${text}`}
-          </button>
-        );
-      })}
-    </aside>
-  );
 }
 
 export function App({
@@ -730,6 +335,7 @@ export function App({
   const avatarSyncKeyRef = useRef("");
   const notificationEventIdsRef = useRef(new Set<string>());
   const toastTimerRef = useRef<number | null>(null);
+  const intentionalLeaveRef = useRef(false);
 
   const notify = useCallback((message: string) => {
     if (toastTimerRef.current !== null) {
@@ -840,8 +446,7 @@ export function App({
     setRoomClosureNotice(message.trim() || "房间已关闭，请确认后返回主界面");
   }, []);
 
-  const confirmClosedRoom = useCallback(() => {
-    const message = roomClosureNotice ?? "房间已关闭";
+  const resetRoomState = useCallback(() => {
     clearFrame();
     snapshotRef.current = null;
     frameContextRef.current = "";
@@ -857,8 +462,13 @@ export function App({
     setCurrentWord(null);
     setSavedReplayAvailable(false);
     onSnapshot?.(null);
+  }, [clearFrame, onSnapshot]);
+
+  const confirmClosedRoom = useCallback(() => {
+    const message = roomClosureNotice ?? "房间已关闭";
+    resetRoomState();
     reportEntryError(`${message}。你已返回主界面。`);
-  }, [clearFrame, onSnapshot, reportEntryError, roomClosureNotice]);
+  }, [reportEntryError, resetRoomState, roomClosureNotice]);
 
   const applySnapshot = useCallback(
     (next: PublicRoomSnapshot) => {
@@ -1179,6 +789,10 @@ export function App({
       });
       socket.addEventListener("close", (event) => {
         if (disposed) {
+          return;
+        }
+        if (intentionalLeaveRef.current) {
+          setConnection("offline");
           return;
         }
         if (event.code === ROOM_REMOVED_CLOSE_CODE) {
@@ -1598,6 +1212,7 @@ export function App({
 
   const createRoom = async (nickname: string, password: string) => {
     rememberManualNickname(nickname);
+    intentionalLeaveRef.current = false;
     setBusy(true);
     setError(null);
     try {
@@ -1621,6 +1236,7 @@ export function App({
     password: string
   ) => {
     rememberManualNickname(nickname);
+    intentionalLeaveRef.current = false;
     setBusy(true);
     setError(null);
     const code = roomCodeInput.trim().toUpperCase();
@@ -1643,6 +1259,54 @@ export function App({
       setBusy(false);
     }
   };
+
+  const leaveCurrentRoom = useCallback(async () => {
+    const current = snapshotRef.current;
+    if (!current || busy) {
+      return;
+    }
+    const isHost = current.hostId === current.selfPlayerId;
+    const confirmed = window.confirm(
+      isHost
+        ? "确定关闭房间并返回主界面吗？其他玩家会立即收到房间关闭通知。"
+        : "确定退出房间并返回主界面吗？"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    intentionalLeaveRef.current = true;
+    setBusy(true);
+    let leaveError: unknown = null;
+    try {
+      if (transport) {
+        await transport.leaveRoom();
+      } else {
+        const response = await fetch("/api/session", {
+          method: "DELETE",
+          credentials: "same-origin"
+        });
+        if (!response.ok) {
+          throw await responseError(response, "退出房间失败");
+        }
+      }
+    } catch (requestError) {
+      leaveError = requestError;
+    } finally {
+      resetRoomState();
+      setBusy(false);
+    }
+
+    if (leaveError) {
+      reportEntryError(
+        `已返回主界面，但未能通知房间服务器：${
+          leaveError instanceof Error ? leaveError.message : "连接已中断"
+        }`
+      );
+      return;
+    }
+    notify(isHost ? "房间已关闭" : "已退出房间");
+  }, [busy, notify, reportEntryError, resetRoomState, transport]);
 
   const openWordManager = useCallback(() => {
     if (
@@ -1890,142 +1554,67 @@ export function App({
         data-role={isLogicalHost ? "host" : "player"}
         data-ui="game-screen"
       >
-        <header className="topbar" data-ui="topbar">
-          <div className="brand">
-            <span className="brand__mark" aria-hidden="true">
-              画
-            </span>
-            <span>
-              <strong>画猜现场</strong>
-              <RoomCodeCopyButton
-                onCopy={() => void copyRoomCode(snapshot.roomCode)}
-                roomCode={snapshot.roomCode}
-              />
-            </span>
-          </div>
-          <div className="topbar__status">
-            <button
-              className="topbar-content-button"
-              onClick={openWordManager}
-              type="button"
-            >
-              词库
-            </button>
-            {isLogicalHost && isLobby ? (
-              <label className="mode-switcher">
-                <span className="sr-only">切换游戏模式</span>
-                <select
-                  aria-label="游戏模式"
-                  onChange={(event) => switchMode(event.target.value as GameModeId)}
-                  value={snapshot.game.mode}
-                >
-                  {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => (
-                    <option
-                      disabled={
-                        mode === "draw-relay" &&
-                        snapshot.game.mode !== "draw-relay" &&
-                        !snapshot.replayCapability.available
-                      }
-                      key={mode}
-                      value={mode}
-                    >
-                      {GAME_MODE_LABELS[mode]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <span className="mode-chip">{GAME_MODE_LABELS[snapshot.game.mode]}</span>
-            )}
-            {isLogicalHost && !isLobby && (
-              <button
-                className="topbar-content-button"
-                data-action={showRoomSettings ? "return-to-game" : "open-room-settings"}
-                data-critical-kind="action"
-                data-critical-label={showRoomSettings ? "返回游戏" : "返回房间设置"}
-                data-critical-ui="room-settings-toggle"
-                data-ui="room-settings-toggle"
-                onClick={showRoomSettings ? returnToGame : openRoomSettings}
-                type="button"
-              >
-                {showRoomSettings ? "返回游戏" : "返回房间"}
-              </button>
-            )}
-            {hostControls && snapshot.runControl.status === "running" && (
-              <button
-                className="topbar-content-button"
-                data-ui="actual-host-pause"
-                onClick={() =>
-                  void hostControls
-                    .pause(snapshot.roomCode)
-                    .catch((hostError: unknown) =>
-                      notify(
-                        hostError instanceof Error ? hostError.message : "暂停失败"
+        <AppTopBar
+          connection={connection}
+          menu={
+            <AppMoreMenu
+              auxiliaryAction={
+                savedReplayAvailable &&
+                hostControls?.replay &&
+                !(
+                  snapshot.game.mode === "draw-relay" &&
+                  snapshot.game.phase === "RESULT"
+                ) ? (
+                  <button
+                    className="menu-action"
+                    data-action="open-last-replay"
+                    onClick={() =>
+                      void hostControls.replay
+                        ?.openFile(snapshot.roomCode)
+                        .catch((hostError: unknown) =>
+                          notify(
+                            hostError instanceof Error
+                              ? hostError.message
+                              : "无法打开回放"
+                          )
+                        )
+                    }
+                    type="button"
+                  >
+                    打开上次回放
+                  </button>
+                ) : undefined
+              }
+              busy={busy}
+              desktopControl={topbarAddon}
+              notificationAction={
+                !transport &&
+                notificationsEnabled &&
+                notificationPermission === "default" ? (
+                  <button
+                    className="menu-action"
+                    data-action="enable-notifications"
+                    onClick={() =>
+                      void Notification.requestPermission().then(
+                        setNotificationPermission
                       )
-                    )
-                }
-                type="button"
-              >
-                暂停全场
-              </button>
-            )}
-            {hostControls && snapshot.runControl.status === "paused" && (
-              <button
-                className="topbar-content-button"
-                data-ui="actual-host-resume"
-                onClick={() =>
-                  void hostControls
-                    .resume(snapshot.roomCode)
-                    .catch((hostError: unknown) =>
-                      notify(
-                        hostError instanceof Error ? hostError.message : "恢复失败"
-                      )
-                    )
-                }
-                type="button"
-              >
-                恢复全场
-              </button>
-            )}
-            {hostControls?.replay && savedReplayAvailable && (
-              <button
-                className="topbar-content-button"
-                onClick={() =>
-                  void hostControls
-                    .replay!.openFile(snapshot.roomCode)
-                    .catch((hostError: unknown) =>
-                      notify(
-                        hostError instanceof Error ? hostError.message : "无法打开回放"
-                      )
-                    )
-                }
-                type="button"
-              >
-                打开上次回放
-              </button>
-            )}
-            {!transport &&
-              notificationsEnabled &&
-              notificationPermission === "default" && (
-                <button
-                  className="topbar-content-button"
-                  onClick={() =>
-                    void Notification.requestPermission().then(
-                      setNotificationPermission
-                    )
-                  }
-                  type="button"
-                >
-                  开启收尾通知
-                </button>
-              )}
-            {topbarAddon}
-            <span className="phase-label">
-              {PHASE_LABELS[snapshot.game.phase] ?? snapshot.game.phase}
-            </span>
-            <StatusDot state={connection} />
-          </div>
-        </header>
+                    }
+                    type="button"
+                  >
+                    开启收尾通知
+                  </button>
+                ) : undefined
+              }
+              onLeave={() => void leaveCurrentRoom()}
+              onManageWords={openWordManager}
+              showWordManager={!isLobby}
+            />
+          }
+          modeLabel={GAME_MODE_LABELS[snapshot.game.mode]}
+          onCopyRoomCode={() => void copyRoomCode(snapshot.roomCode)}
+          phaseLabel={PHASE_LABELS[snapshot.game.phase] ?? snapshot.game.phase}
+          roomCode={snapshot.roomCode}
+        />
 
         {showRoomSettings && roomSettingsDraft ? (
           <RoomSettingsScreen
@@ -2047,66 +1636,60 @@ export function App({
                 全场已恢复，采集将在 {resumeDelay} 秒后继续。
               </div>
             )}
-            <PassControls send={send} snapshot={snapshot} />
-            {isLobby && isLogicalHost && (
-              <section
-                aria-label="选择游戏模式"
-                className="mode-selection-cards"
-                data-ui="mode-selection-cards"
-              >
-                {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => {
-                  const selected = mode === snapshot.game.mode;
-                  const capabilityBlocked =
-                    mode === "draw-relay" && !snapshot.replayCapability.available;
-                  return (
-                    <button
-                      aria-pressed={selected}
-                      className={
-                        selected
-                          ? "mode-selection-card is-selected"
-                          : "mode-selection-card"
-                      }
-                      disabled={selected || capabilityBlocked}
-                      key={mode}
-                      onClick={() => switchMode(mode)}
-                      type="button"
+            {isLobby ? (
+              <LobbyLayout
+                modeSelector={
+                  <LobbyModeSelector onSwitchMode={switchMode} snapshot={snapshot} />
+                }
+                sidebar={
+                  <>
+                    {lobbyAddon}
+                    <section
+                      className="panel lobby-profile-panel"
+                      data-ui="local-profile"
                     >
-                      <strong>{GAME_MODE_LABELS[mode]}</strong>
-                      <span>{GAME_MODE_DESCRIPTIONS[mode]}</span>
-                      {mode === "draw-relay" && (
-                        <em className={capabilityBlocked ? "is-unavailable" : ""}>
-                          {snapshot.replayCapability.available
-                            ? `主机 FFmpeg 可用 · ${snapshot.replayCapability.encoder}`
-                            : snapshot.replayCapability.message}
-                        </em>
-                      )}
-                      {selected && <small>当前模式</small>}
-                    </button>
-                  );
-                })}
-              </section>
-            )}
-            <ModeRenderer {...modeProps} />
-
-            {isLobby && (
-              <section className="mode-lobby-extras">
-                {lobbyAddon}
-                <section className="panel lobby-profile-panel" data-ui="local-profile">
-                  <div className="panel-heading">
-                    <div>
-                      <p className="eyebrow">Local profile</p>
-                      <h2>房间与头像</h2>
-                    </div>
-                    <span className="step-pill">可选</span>
-                  </div>
-                  <AvatarEditor
-                    avatar={localAvatar}
-                    label="当前房间头像"
-                    onChange={setLocalAvatar}
-                    services={content}
+                      <div className="panel-heading">
+                        <div>
+                          <p className="eyebrow">Your seat</p>
+                          <h2>头像与个人状态</h2>
+                        </div>
+                        <span className="step-pill">可选</span>
+                      </div>
+                      <AvatarEditor
+                        avatar={localAvatar}
+                        label="当前房间头像"
+                        onChange={setLocalAvatar}
+                        services={content}
+                      />
+                    </section>
+                  </>
+                }
+              >
+                <ModeRenderer {...modeProps} />
+              </LobbyLayout>
+            ) : (
+              <GameWorkspace
+                actionBar={
+                  <ContextActionBar
+                    hostControls={hostControls}
+                    isLogicalHost={isLogicalHost}
+                    onOpenSettings={openRoomSettings}
+                    onPause={() =>
+                      void hostControls
+                        ?.pause(snapshot.roomCode)
+                        .catch((hostError: unknown) =>
+                          notify(
+                            hostError instanceof Error ? hostError.message : "暂停失败"
+                          )
+                        )
+                    }
+                    send={send}
+                    snapshot={snapshot}
                   />
-                </section>
-              </section>
+                }
+              >
+                <ModeRenderer {...modeProps} />
+              </GameWorkspace>
             )}
 
             {snapshot.runControl.status === "paused" && (
@@ -2124,18 +1707,11 @@ export function App({
                     计时、输入与画面上传均已冻结。保留本地画布，等待服务器主机恢复。
                   </p>
                   <div className="settings-actions">
-                    {isLogicalHost && (
-                      <button
-                        className="secondary-button"
-                        onClick={openRoomSettings}
-                        type="button"
-                      >
-                        进入房间设置
-                      </button>
-                    )}
                     {hostControls && (
                       <button
                         className="primary-button"
+                        data-action="resume-game"
+                        data-ui="actual-host-resume"
                         onClick={() =>
                           void hostControls
                             .resume(snapshot.roomCode)

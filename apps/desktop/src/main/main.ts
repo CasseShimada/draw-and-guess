@@ -1311,7 +1311,11 @@ async function boot(): Promise<void> {
     shutdownRequested = true;
     logger.info("应用正在安全退出");
     windowManager.requestStopSharing();
-    await gameClient.disconnect();
+    await gameClient.leaveRoom().catch((error: unknown) => {
+      logger.warn("退出程序时未能通知房间服务器", {
+        message: error instanceof Error ? error.message : "未知错误"
+      });
+    });
     logger.info("游戏连接已关闭");
     await embeddedServer.stop();
     logger.info("内置服务器已关闭");

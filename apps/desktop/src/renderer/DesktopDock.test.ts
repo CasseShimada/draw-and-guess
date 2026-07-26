@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  DesktopControlCenterNav,
   DesktopDock,
   canManageConnectionPanel,
   visibleDesktopPanel
@@ -25,17 +26,39 @@ describe("desktop dock access", () => {
         captureActive: false,
         captureReady: false,
         connectionManagementAvailable: false,
-        onToggle: vi.fn(),
+        onOpen: vi.fn(),
         serverState: "stopped"
       })
     );
 
     expect(html).toContain('class="desktop-toolbar"');
-    expect(html).toContain('aria-label="桌面应用工具"');
+    expect(html).toContain('aria-label="打开桌面控制中心"');
+    expect(html).toContain(">控制中心</button>");
     expect(html).not.toContain('data-ui="connection-management"');
     expect(html).not.toContain(">联机</button>");
-    expect(html).toContain(">采集</button>");
-    expect(html).toContain(">设置</button>");
-    expect(html).toContain(">诊断</button>");
+    expect(html).not.toContain(">采集</button>");
+    expect(html).not.toContain(">偏好设置</strong>");
+    expect(html).not.toContain(">诊断</strong>");
+  });
+
+  it("keeps all desktop tools inside one sectioned control center", () => {
+    const html = renderToStaticMarkup(
+      createElement(DesktopControlCenterNav, {
+        activePanel: "capture",
+        captureActive: false,
+        captureReady: true,
+        connectionManagementAvailable: true,
+        onSelect: vi.fn(),
+        serverState: "running"
+      })
+    );
+
+    expect(html).toContain('aria-label="桌面控制中心分区"');
+    expect(html).toContain('data-ui="connection-management"');
+    expect(html).toContain(">联机</strong>");
+    expect(html).toContain(">采集</strong>");
+    expect(html).toContain(">偏好设置</strong>");
+    expect(html).toContain(">诊断</strong>");
+    expect(html.match(/aria-selected="true"/gu) ?? []).toHaveLength(1);
   });
 });

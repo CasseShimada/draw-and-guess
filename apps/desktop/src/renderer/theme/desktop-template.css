@@ -1286,3 +1286,317 @@
     transition: none;
   }
 }
+
+/* Unified desktop control center · v0.5.10 */
+
+.desktop-toolbar,
+[data-ui="desktop-toolbar"] {
+  display: block;
+  padding: 0;
+  border: 0;
+}
+
+.desktop-toolbar button {
+  min-width: 0;
+  min-height: 2.35rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper-light);
+  font-size: 0.76rem;
+  gap: 0.5rem;
+}
+
+.desktop-toolbar button:hover,
+.desktop-toolbar button:focus-visible,
+.desktop-toolbar button.active {
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  background: #eaf6f3;
+}
+
+.desktop-toolbar__status {
+  display: inline-flex;
+  align-items: center;
+}
+
+.desktop-toolbar__status .dock-dot + .dock-dot {
+  margin-left: -0.15rem;
+}
+
+.dock-dot {
+  border-color: var(--paper-light);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.desktop-panel-backdrop {
+  background: rgba(28, 34, 38, 0.42);
+  backdrop-filter: blur(5px);
+}
+
+.desktop-control-center {
+  position: fixed;
+  z-index: 85;
+  inset: 1rem;
+  display: grid;
+  width: min(1180px, calc(100vw - 2rem));
+  height: calc(100vh - 2rem);
+  margin-left: auto;
+  overflow: hidden;
+  grid-template-columns: 13.5rem minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper-light);
+  box-shadow: 0 26px 80px rgba(25, 31, 35, 0.28);
+  animation: control-center-enter 180ms ease-out;
+}
+
+@keyframes control-center-enter {
+  from {
+    opacity: 0;
+    transform: translateX(12px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.desktop-control-center__nav {
+  display: flex;
+  min-width: 0;
+  padding: 1rem;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: #f0efe9;
+}
+
+.desktop-control-center__brand {
+  display: flex;
+  padding: 0.25rem 0.35rem 1rem;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.desktop-control-center__brand > span {
+  display: grid;
+  width: 2.3rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--coral);
+  color: white;
+  font-size: 1.25rem;
+  font-weight: 900;
+}
+
+.desktop-control-center__brand > div {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.desktop-control-center__brand small {
+  color: var(--muted);
+  font-size: 0.56rem;
+  letter-spacing: 0.11em;
+}
+
+.desktop-control-center__tabs {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.desktop-control-center__tabs button {
+  display: grid;
+  min-width: 0;
+  min-height: 3.75rem;
+  padding: 0.65rem 0.7rem;
+  grid-template-columns: 1.1rem minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  gap: 0.6rem;
+  text-align: left;
+}
+
+.desktop-control-center__tabs button:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.desktop-control-center__tabs button.active {
+  border-color: var(--line);
+  background: var(--paper-light);
+  box-shadow: 0 5px 16px rgba(31, 38, 42, 0.08);
+}
+
+.desktop-control-center__tabs button > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.desktop-control-center__tabs strong {
+  font-size: 0.82rem;
+}
+
+.desktop-control-center__tabs small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.64rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-center-icon {
+  color: var(--teal);
+  font-weight: 900;
+  text-align: center;
+}
+
+.desktop-control-center__note {
+  margin: auto 0.35rem 0;
+  color: var(--muted);
+  font-size: 0.65rem;
+  line-height: 1.5;
+}
+
+.desktop-control-center__content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.desktop-control-center .desktop-panel,
+.desktop-control-center [data-ui="settings-panel"],
+.desktop-control-center [data-ui="connection-panel"],
+.desktop-control-center [data-ui="diagnostics-panel"],
+.desktop-control-center [data-ui="capture-studio"] {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--paper);
+  box-shadow: none;
+  transform: none;
+}
+
+.desktop-control-center .desktop-panel--open {
+  pointer-events: auto;
+}
+
+.desktop-control-center .desktop-panel__heading {
+  height: 5rem;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 254, 250, 0.96);
+}
+
+.desktop-control-center .desktop-panel__heading > button {
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+}
+
+.desktop-control-center .desktop-panel__content {
+  height: calc(100% - 5rem);
+  padding: 1.15rem;
+}
+
+.desktop-control-center .capture-studio__body {
+  height: calc(100% - 5rem);
+}
+
+.desktop-control-center .control-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(31, 38, 42, 0.06);
+}
+
+.desktop-control-center .room-close-zone {
+  border-color: color-mix(in srgb, var(--coral) 40%, var(--line));
+  background: #fff2ef;
+  color: var(--ink);
+}
+
+.desktop-capture-card {
+  padding-bottom: 0;
+}
+
+.desktop-capture-card__body {
+  padding: 1rem 1.2rem;
+}
+
+@media (max-width: 900px) {
+  .desktop-control-center {
+    grid-template-columns: 11rem minmax(0, 1fr);
+  }
+
+  .desktop-control-center__nav {
+    padding: 0.75rem;
+  }
+}
+
+@media (max-width: 680px) {
+  .desktop-control-center {
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    border: 0;
+    border-radius: 0;
+  }
+
+  .desktop-control-center__nav {
+    padding: 0.6rem 0.75rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .desktop-control-center__brand,
+  .desktop-control-center__note {
+    display: none;
+  }
+
+  .desktop-control-center__tabs {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .desktop-control-center__tabs button {
+    min-height: 3rem;
+    flex: 1 0 auto;
+    grid-template-columns: auto minmax(0, auto);
+  }
+
+  .desktop-control-center__tabs small {
+    display: none;
+  }
+
+  .desktop-control-center .desktop-panel__heading {
+    height: 4.5rem;
+  }
+
+  .desktop-control-center .desktop-panel__content,
+  .desktop-control-center .capture-studio__body {
+    height: calc(100% - 4.5rem);
+  }
+
+  .desktop-control-center .capture-studio {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-control-center {
+    animation: none;
+  }
+}

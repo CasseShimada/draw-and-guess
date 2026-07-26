@@ -176,6 +176,10 @@ function setSessionCookie(
   });
 }
 
+function clearSessionCookie(reply: FastifyReply): void {
+  reply.clearCookie(SESSION_COOKIE, { path: "/" });
+}
+
 export async function createApp(options: CreateAppOptions = {}): Promise<{
   app: FastifyInstance;
   service: GameService;
@@ -315,6 +319,17 @@ export async function createApp(options: CreateAppOptions = {}): Promise<{
   app.get("/api/session", (request) => {
     const access = service.resumeSession(sessionToken(request), "browser");
     return { snapshot: service.snapshot(access.room, access.player.id) };
+  });
+
+  app.delete("/api/session", (request, reply) => {
+    const browserRequest = !request.headers.authorization;
+    const access = authenticatedRoomAccess(request, service);
+    service.leaveRoom(access);
+    if (browserRequest) {
+      clearSessionCookie(reply);
+    }
+    reply.code(204);
+    return reply.send();
   });
 
   app.post("/api/desktop/rooms", async (request, reply) => {

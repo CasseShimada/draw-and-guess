@@ -217,6 +217,55 @@ describe("game service protocol-v5 classic flow", () => {
     ).rejects.toThrow("房间不存在");
   });
 
+  it("removes a deliberate leaver immediately while retaining unexpected disconnects", async () => {
+    const hostJoin = await service.createRoom("房主", "secret", "desktop");
+    const roomCode = hostJoin.snapshot.roomCode;
+    const reconnectingJoin = await service.joinRoom(
+      roomCode,
+      "断线玩家",
+      "secret",
+      "browser"
+    );
+    const leavingJoin = await service.joinRoom(
+      roomCode,
+      "退出玩家",
+      "secret",
+      "desktop"
+    );
+    const host = service.resumeSession(hostJoin.sessionToken, "desktop");
+    const reconnecting = service.resumeSession(
+      reconnectingJoin.sessionToken,
+      "browser"
+    );
+    const leaving = service.resumeSession(leavingJoin.sessionToken, "desktop");
+    const hostSocket = new FakeSocket();
+    const reconnectingSocket = new FakeSocket();
+    const leavingSocket = new FakeSocket();
+    service.connectPlayer(host, hostSocket, "desktop");
+    service.connectPlayer(reconnecting, reconnectingSocket, "browser");
+    service.connectPlayer(leaving, leavingSocket, "desktop");
+
+    service.disconnectPlayer(roomCode, reconnecting.player.id, reconnectingSocket);
+    expect(host.room.players.has(reconnecting.player.id)).toBe(true);
+    expect(
+      service.resumeSession(reconnectingJoin.sessionToken, "browser").player.id
+    ).toBe(reconnecting.player.id);
+
+    service.leaveRoom(leaving);
+
+    expect(host.room.players.has(leaving.player.id)).toBe(false);
+    expect(host.room.players.has(reconnecting.player.id)).toBe(true);
+    expect(leavingSocket.closedWith).toEqual({
+      code: 1000,
+      reason: "已退出房间"
+    });
+    expect(latestMessage(hostSocket, "room:snapshot").snapshot.players).toHaveLength(2);
+    expect(host.room.chat.at(-1)?.text).toBe(`${leaving.player.nickname} 已退出房间`);
+    expect(() => service.resumeSession(leavingJoin.sessionToken, "desktop")).toThrow(
+      "会话已失效"
+    );
+  });
+
   it("keeps words private, relays accepted frames, finalizes for ten seconds, and scores", async () => {
     const hostJoin = await service.createRoom("画手", "secret", "desktop");
     const roomCode = hostJoin.snapshot.roomCode;
