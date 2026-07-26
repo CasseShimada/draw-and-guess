@@ -252,8 +252,14 @@ async function validateThemeAsset(
   if (!ALLOWED_EXTENSIONS.has(extension)) {
     throw new Error(`CSS 素材类型不在允许列表中：${extension || "未知"}`);
   }
-  const candidate = path.resolve(sourceRoot, ...segments);
-  if (!isInside(sourceRoot, candidate)) {
+  let resolvedRoot: string;
+  try {
+    resolvedRoot = await realpath(sourceRoot);
+  } catch {
+    throw new Error("CSS 素材根目录不存在");
+  }
+  const candidate = path.resolve(resolvedRoot, ...segments);
+  if (!isInside(resolvedRoot, candidate)) {
     throw new Error("CSS 素材路径超出 CSS 根目录");
   }
   let resolved: string;
@@ -262,7 +268,7 @@ async function validateThemeAsset(
   } catch {
     throw new Error(`CSS 引用的素材不存在：${rawReference}`);
   }
-  if (!isInside(sourceRoot, resolved)) {
+  if (!isInside(resolvedRoot, resolved)) {
     throw new Error("CSS 素材符号链接逃逸了 CSS 根目录");
   }
   const info = await stat(resolved);

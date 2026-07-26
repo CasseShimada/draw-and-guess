@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -104,6 +104,30 @@ describe("theme CSS compiler", () => {
       ).rejects.toThrow();
     }
   });
+
+  it.runIf(process.platform !== "win32")(
+    "accepts assets when the configured source root has a symbolic-link ancestor",
+    async () => {
+      const root = await sourceRoot();
+      const actualRoot = path.join(root, "actual");
+      const linkedRoot = path.join(root, "linked");
+      await mkdir(actualRoot);
+      await writeFile(path.join(actualRoot, "paper.png"), Uint8Array.from([1, 2, 3]));
+      await symlink(actualRoot, linkedRoot, "dir");
+
+      const result = await compileThemeCss(
+        '.panel { background: url("./paper.png"); }',
+        {
+          themeId: "linked-root",
+          applyMode: "override",
+          sourceRoot: linkedRoot,
+          themeApiVersion: 1
+        }
+      );
+
+      expect(result.assets).toHaveLength(1);
+    }
+  );
 
   it("rejects incompatible theme API versions without deleting source data", async () => {
     const root = await sourceRoot();
