@@ -138,6 +138,11 @@ export function DrawRelayModeView({
           )}
           <button
             className={selfConfirmed ? "secondary-button" : "primary-button"}
+            data-action="confirm-recording"
+            data-critical-kind="action"
+            data-critical-label="确认接龙录像说明"
+            data-critical-ui="relay-recording-consent"
+            data-ui={selfConfirmed ? "secondary-button" : "primary-button"}
             onClick={() =>
               send({
                 type: "relay:recording-consent",
@@ -194,6 +199,8 @@ export function DrawRelayModeView({
             <div className="settings-actions">
               <button
                 className="secondary-button"
+                data-action="save-mode-settings"
+                data-ui="secondary-button"
                 onClick={() =>
                   send({
                     type: "mode:settings",
@@ -206,6 +213,11 @@ export function DrawRelayModeView({
               </button>
               <button
                 className="primary-button"
+                data-action="start-game"
+                data-critical-kind="action"
+                data-critical-label="开始绘画接龙"
+                data-critical-ui="start-relay-game"
+                data-ui="primary-button"
                 disabled={!canStart}
                 onClick={() => send({ type: "game:start" })}
                 type="button"
@@ -238,6 +250,11 @@ export function DrawRelayModeView({
                 {!activeTask?.ready && (
                   <button
                     className="primary-button"
+                    data-action="ready-private-task"
+                    data-critical-kind="action"
+                    data-critical-label="确认私密接龙任务"
+                    data-critical-ui="relay-task-ready"
+                    data-ui="primary-button"
                     onClick={() =>
                       send({
                         type: "relay:task-ready",
@@ -295,6 +312,10 @@ export function DrawRelayModeView({
               <img
                 alt="上一位玩家冻结的接龙画面"
                 className="reference-image"
+                data-critical-kind="content"
+                data-critical-label="当前私密接龙画面"
+                data-critical-ui="relay-private-image"
+                data-ui="private-task-image"
                 src={taskAsset.url}
               />
             ) : (
@@ -306,12 +327,24 @@ export function DrawRelayModeView({
                   你的猜词
                   <input
                     autoComplete="off"
+                    data-critical-kind="input"
+                    data-critical-label="接龙猜词输入"
+                    data-critical-ui="relay-guess-input"
+                    data-ui="guess-input"
                     maxLength={80}
                     onChange={(event) => setGuess(event.target.value)}
                     value={guess}
                   />
                 </label>
-                <button className="primary-button" type="submit">
+                <button
+                  className="primary-button"
+                  data-action="submit-relay-guess"
+                  data-critical-kind="action"
+                  data-critical-label="提交接龙猜词"
+                  data-critical-ui="relay-guess-submit"
+                  data-ui="primary-button"
+                  type="submit"
+                >
                   私密提交 · {formatDuration(countdown)}
                 </button>
               </form>
@@ -336,7 +369,13 @@ export function DrawRelayModeView({
         <section className="game-main">
           <div className="game-toolbar">
             <strong>{game.phase === "FINALIZING" ? "展示收尾" : "绘画接龙中"}</strong>
-            <span className="timer">
+            <span
+              className="timer"
+              data-critical-kind="content"
+              data-critical-label="接龙绘画剩余时间"
+              data-critical-ui="relay-timer"
+              data-ui="timer"
+            >
               {formatDuration(
                 game.phase === "FINALIZING" ? finalizationCountdown : countdown
               )}
@@ -364,6 +403,11 @@ export function DrawRelayModeView({
           {isActive && drawing?.status === "drawing" && (
             <button
               className="primary-button"
+              data-action="finish-drawing"
+              data-critical-kind="action"
+              data-critical-label="完成接龙绘制"
+              data-critical-ui="finish-relay-drawing"
+              data-ui="primary-button"
               onClick={() =>
                 send({
                   type: "drawing:finish",
@@ -486,6 +530,11 @@ export function DrawRelayModeView({
       {isHost && (
         <button
           className="primary-button"
+          data-action="return-to-lobby"
+          data-critical-kind="action"
+          data-critical-label="返回接龙模式大厅"
+          data-critical-ui="return-relay-lobby"
+          data-ui="primary-button"
           onClick={() => send({ type: "game:return-lobby" })}
           type="button"
         >

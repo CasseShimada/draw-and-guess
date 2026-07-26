@@ -135,6 +135,11 @@ export function RoomSettingsScreen({
           <div className="room-settings-actions">
             <button
               className="secondary-button"
+              data-action="return-to-game"
+              data-critical-kind="action"
+              data-critical-label="返回当前游戏"
+              data-critical-ui="return-to-game"
+              data-ui="secondary-button"
               disabled={busy}
               onClick={onReturnToGame}
               type="button"
@@ -143,6 +148,8 @@ export function RoomSettingsScreen({
             </button>
             <button
               className="secondary-button"
+              data-action="restore-room-settings"
+              data-ui="secondary-button"
               disabled={!dirty || busy}
               onClick={onRestore}
               type="button"
@@ -151,6 +158,10 @@ export function RoomSettingsScreen({
             </button>
             <button
               className="primary-button"
+              data-action="apply-and-restart"
+              data-critical-kind="action"
+              data-critical-label="应用设置并重启游戏"
+              data-critical-ui="apply-and-restart"
               data-ui="apply-and-restart"
               disabled={busy}
               onClick={onRestart}

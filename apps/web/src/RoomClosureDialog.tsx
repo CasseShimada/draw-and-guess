@@ -21,6 +21,10 @@ export function RoomClosureDialog({
         <button
           autoFocus
           className="primary-button"
+          data-action="confirm-room-closure"
+          data-critical-kind="action"
+          data-critical-label="确认房间已结束并返回主界面"
+          data-critical-ui="confirm-room-closure"
           data-ui="confirm-room-closure"
           onClick={onConfirm}
           type="button"

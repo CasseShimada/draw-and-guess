@@ -1,6 +1,10 @@
 /*
- * 画猜现场本地主题示例
- * 导入器会自动把普通选择器限制在可主题根节点中。
+ * 画猜现场局部覆盖主题示例
+ * Theme API Version: 1
+ * Apply Mode: override
+ *
+ * 请在设置中选择“导入覆盖 CSS”。导入器会自动把普通选择器限制在
+ * [data-ui="theme-root"] 内，因此这里不需要重复书写主题根选择器。
  */
 
 :root {
@@ -24,8 +28,21 @@
   background: linear-gradient(135deg, #23263a, #191b2b);
 }
 
-[data-ui="player-row"] {
+[data-ui="player-card"] {
   border-color: color-mix(in srgb, var(--line), transparent 35%);
+}
+
+[data-ui="primary-button"] {
+  border-radius: 0.7rem;
+}
+
+[data-ui="theme-root"][data-mode="classic"][data-phase="drawing"]
+  [data-ui="timer"][data-state="urgent"] {
+  color: var(--yellow);
+}
+
+[data-ui="theme-root"][data-platform="desktop"] [data-ui="settings-panel"] {
+  backdrop-filter: blur(8px);
 }
 
 [data-ui="drawing-board"] {

@@ -12,7 +12,12 @@ import type {
   ReplayHostCapabilitySchema
 } from "@draw-guess/protocol";
 import type { NormalizedCrop } from "@draw-guess/capture-core";
-import { CONTENT_LIMITS, WordPoolUploadSchema } from "@draw-guess/content";
+import {
+  CONTENT_LIMITS,
+  ThemeApplyModeSchema,
+  WordPoolUploadSchema
+} from "@draw-guess/content";
+import type { ThemeApplyMode } from "@draw-guess/content";
 import type {
   LocalAvatarSchema,
   WordPackFileSchema,
@@ -74,7 +79,13 @@ export const IPC_CHANNELS = {
   diagnosticsRead: "diagnostics:read",
   diagnosticsExport: "diagnostics:export",
   themeStatus: "theme:status",
+  themeChanged: "theme:changed",
   themeImport: "theme:import",
+  themeCreateDefault: "theme:create-default",
+  themeExportDefault: "theme:export-default",
+  themeOpenFolder: "theme:open-folder",
+  themeReload: "theme:reload",
+  themeSuspend: "theme:suspend",
   themeEnable: "theme:enable",
   themeDisable: "theme:disable",
   themeDelete: "theme:delete",
@@ -251,7 +262,12 @@ export const ThemeStatusSchema = z
     assetCount: z.number().int().nonnegative(),
     cssBytes: z.number().int().nonnegative(),
     safeMode: z.boolean(),
-    error: z.string().nullable()
+    error: z.string().nullable(),
+    applyMode: ThemeApplyModeSchema.nullable(),
+    themeApiVersion: z.number().int().positive().nullable(),
+    supportedThemeApiVersion: z.number().int().positive(),
+    sourcePath: z.string().nullable(),
+    workDirectory: z.string()
   })
   .strict();
 
@@ -674,7 +690,13 @@ export interface DesktopBridge {
   };
   theme: {
     status(): Promise<ThemeStatus>;
-    import(): Promise<ThemeStatus>;
+    onStatus(listener: (status: ThemeStatus) => void): () => void;
+    import(applyMode: ThemeApplyMode): Promise<ThemeStatus>;
+    createFromDefault(): Promise<ThemeStatus>;
+    exportDefault(): Promise<boolean>;
+    openFolder(): Promise<void>;
+    reload(): Promise<ThemeStatus>;
+    suspend(reason: string): Promise<ThemeStatus>;
     enable(): Promise<ThemeStatus>;
     disable(): Promise<ThemeStatus>;
     delete(): Promise<ThemeStatus>;

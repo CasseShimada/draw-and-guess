@@ -17,7 +17,8 @@ import {
   IPC_CHANNELS,
   SharingStateSchema,
   type GameEvent,
-  type SharingState
+  type SharingState,
+  type ThemeStatus
 } from "../shared/ipc.js";
 import type { CaptureSourceService } from "./capture-source-service.js";
 import type { RedactingLogger } from "./redacting-logger.js";
@@ -272,6 +273,10 @@ export class WindowManager {
     this.#sendToMain(IPC_CHANNELS.serverStatus, status);
   }
 
+  sendThemeStatus(status: ThemeStatus): void {
+    this.#sendToMain(IPC_CHANNELS.themeChanged, status);
+  }
+
   requestStopSharing(): void {
     this.#sendToMain(IPC_CHANNELS.sharingStopRequested, null);
     if (this.#overlayWindow && !this.#overlayWindow.isDestroyed()) {
@@ -284,16 +289,15 @@ export class WindowManager {
     if (!window || window.isDestroyed()) {
       return;
     }
-    if (this.#customCssKey) {
-      await window.webContents
-        .removeInsertedCSS(this.#customCssKey)
-        .catch(() => undefined);
-      this.#customCssKey = null;
-    }
-    if (css) {
-      this.#customCssKey = await window.webContents.insertCSS(css, {
-        cssOrigin: "user"
-      });
+    const previousKey = this.#customCssKey;
+    const nextKey = css
+      ? await window.webContents.insertCSS(css, {
+          cssOrigin: "user"
+        })
+      : null;
+    this.#customCssKey = nextKey;
+    if (previousKey) {
+      await window.webContents.removeInsertedCSS(previousKey).catch(() => undefined);
     }
   }
 

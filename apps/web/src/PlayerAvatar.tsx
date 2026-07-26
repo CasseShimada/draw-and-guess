@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import type { PublicPlayer } from "@draw-guess/shared-types";
 
@@ -28,7 +28,11 @@ export function PlayerAvatar({
     <span
       className={`avatar player-avatar ${showImage ? "player-avatar--image" : ""} ${className}`}
       data-ui="player-avatar"
-      style={showImage ? undefined : { background: stableColor(player.id) }}
+      style={
+        showImage
+          ? undefined
+          : ({ "--player-avatar-color": stableColor(player.id) } as CSSProperties)
+      }
     >
       {showImage ? (
         <img

@@ -35,7 +35,7 @@ export function DesktopDock({
     <nav
       aria-label="桌面应用工具"
       className="desktop-toolbar"
-      data-ui="protected-safety"
+      data-ui="desktop-toolbar"
     >
       {connectionManagementAvailable && (
         <button

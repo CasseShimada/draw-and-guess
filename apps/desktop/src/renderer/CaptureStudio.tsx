@@ -418,7 +418,8 @@ export function CaptureStudio({
       aria-hidden={!open}
       aria-label="采集工作室"
       className={`desktop-panel capture-studio ${open ? "desktop-panel--open" : ""}`}
-      data-ui="sharing-safety"
+      data-ui="capture-studio"
+      hidden={!open}
     >
       <header className="desktop-panel__heading">
         <div>

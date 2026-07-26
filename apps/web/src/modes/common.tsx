@@ -105,9 +105,21 @@ export function PlayerRoster({
     [scores, snapshot.players]
   );
   return (
-    <div className="player-list" data-ui="player-list">
+    <div
+      className="player-list"
+      data-critical-kind="content"
+      data-critical-label="房间玩家列表"
+      data-critical-ui="player-list"
+      data-ui="player-list"
+    >
       {players.map((player, index) => (
-        <div className="player-row" data-ui="player-row" key={player.id}>
+        <div
+          className="player-row"
+          data-role={player.isHost ? "host" : "player"}
+          data-state={player.connected ? "connected" : "disconnected"}
+          data-ui="player-card"
+          key={player.id}
+        >
           <span className="player-row__rank">{String(index + 1).padStart(2, "0")}</span>
           <PlayerAvatar avatarUrl={avatarUrls.get(player.id)} player={player} />
           <span className="player-row__identity">
@@ -150,7 +162,7 @@ export function Chat({
     setText("");
   };
   return (
-    <section className="chat-panel panel" data-ui="chat">
+    <section className="chat-panel panel" data-ui="chat-panel">
       <div className="chat-log" aria-live="polite" data-ui="chat-log">
         {snapshot.chat.length === 0 ? (
           <p className="chat-empty">还没有消息。</p>
@@ -171,13 +183,26 @@ export function Chat({
             输入聊天
           </label>
           <input
+            data-critical-kind="input"
+            data-critical-label="聊天或猜词输入"
+            data-critical-ui="chat-input"
+            data-ui="chat-input"
             id="room-chat-input"
             maxLength={280}
             onChange={(event) => setText(event.target.value)}
             placeholder="输入消息，回车发送…"
             value={text}
           />
-          <button type="submit">发送</button>
+          <button
+            data-action="submit-chat"
+            data-critical-kind="action"
+            data-critical-label="发送聊天或猜词"
+            data-critical-ui="chat-submit"
+            data-ui="chat-submit"
+            type="submit"
+          >
+            发送
+          </button>
         </form>
       )}
     </section>
@@ -194,7 +219,13 @@ export function DrawingPreview({
   alt?: string;
 }) {
   return (
-    <div className="drawing-board" data-ui="server-accepted-preview">
+    <div
+      className="drawing-board"
+      data-critical-kind="canvas"
+      data-critical-label="当前绘画画面"
+      data-critical-ui="drawing-board"
+      data-ui="drawing-board"
+    >
       {frameUrl ? (
         <img alt={alt} draggable={false} src={frameUrl} />
       ) : (

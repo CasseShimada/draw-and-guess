@@ -1,6 +1,6 @@
 # 画猜现场
 
-“画猜现场”是一个自带窗口/屏幕采集与房主服务的跨平台桌面派对游戏。0.5.7 提供
+“画猜现场”是一个自带窗口/屏幕采集与房主服务的跨平台桌面派对游戏。0.5.8 提供
 三种玩法：
 
 - 经典你画我猜：轮流画、猜词、计分；
@@ -150,9 +150,12 @@ deck。普通快照只公开包名、分类名和数量。详见 [词库包](doc
 头像源文件及规范化 256×256 RGBA PNG 长期只存当前客户端；房间服务器只在内存中
 暂存规范化副本，并按 revision/ETag 提供认证读取。详见 [头像](docs/avatars.md)。
 
-Electron 可以导入本地 `.css` 及 allowlist 中的相对 PNG/字体素材。导入器使用 AST
-校验、realpath 边界与只读 `drawguess-theme:` 协议；安全控件不受主题影响。
-浏览器版始终使用默认主题。详见 [自定义 CSS](docs/custom-css.md)。
+Electron 的主题 API 1 支持导出完整默认模板、完整替换和默认模板后覆盖，也支持直接
+编辑 `source.css` 并原子重新载入。普通页面、三种模式和桌面设置均提供稳定
+`data-ui`/状态选择器；AST 编译器负责作用域、字体/动画命名空间、realpath 边界和
+只读 `drawguess-theme:` 素材协议。主题根外的 Shadow DOM 安全中心会提供恢复入口，
+并在画布、参考图或整页失效时只对本客户端自动暂停主题。浏览器版使用同一默认模板，
+但不开放任意本地文件导入。详见 [本地 CSS 主题系统](docs/custom-css.md)。
 
 ## 隐私与安全
 
@@ -247,6 +250,7 @@ docs/
   replay-ffmpeg.md                    FFmpeg 探测、目录、配额、压制与隐私
   drawing-finalization.md             服务器展示预览、十秒收尾与通知
   network-connectivity.md             地址/端口加入、局域网、防火墙与公网转发
+  custom-css.md                       主题 API、模板、素材、工作目录与安全恢复
   standalone-upgrade-architecture.md  当前桌面架构与信任边界
 ```
 
@@ -254,6 +258,6 @@ docs/
 单端口 TCP/反向代理、三模式状态机、模式切换、Pass、fake-clock 暂停、
 新 capture session、并发 latest frame、参考图规范化/隐私、匿名 ballot、接龙私密
 交接、FFmpeg fake runner、回放配额/时间线/路径边界/恢复、设置迁移、IPC、采集、
-内容存储和 Electron 安全边界。发布证据记录在
-`docs/release-verification-0.5.1.md`；没有实机运行的平台或双机网络矩阵不会标记为
+内容存储、CSS 主题编译、关键 UI 健康检查和 Electron 安全边界。发布证据记录在
+`docs/release-verification-0.5.8.md`；没有实机运行的平台或双机网络矩阵不会标记为
 已验证。

@@ -52,6 +52,7 @@ import {
 } from "../shared/ipc.js";
 import {
   LocalAvatarSchema,
+  ThemeApplyModeSchema,
   WordPackFileSchema,
   WordPackSelectionSchema,
   WordPackSummarySchema,
@@ -685,32 +686,101 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     () => services.theme.status
   );
 
-  handle(IPC_CHANNELS.themeImport, z.undefined(), ThemeStatusSchema, async () => {
-    const result = await dialog.showOpenDialog({
-      title: "导入本地自定义 CSS",
-      properties: ["openFile"],
+  handle(
+    IPC_CHANNELS.themeImport,
+    ThemeApplyModeSchema,
+    ThemeStatusSchema,
+    async (applyMode) => {
+      const result = await dialog.showOpenDialog({
+        title: applyMode === "replace" ? "导入完整替换主题" : "导入 CSS 覆盖主题",
+        properties: ["openFile"],
+        filters: [{ name: "CSS", extensions: ["css"] }]
+      });
+      if (result.canceled || !result.filePaths[0]) {
+        return services.theme.status;
+      }
+      await services.theme.importFromPath(result.filePaths[0], applyMode);
+      await services.windowManager.applyCustomCss(await services.theme.activeCss());
+      const appliedStatus = services.theme.status;
+      services.tray.updateTheme(appliedStatus.enabled);
+      services.windowManager.sendThemeStatus(appliedStatus);
+      return appliedStatus;
+    }
+  );
+
+  handle(
+    IPC_CHANNELS.themeCreateDefault,
+    z.undefined(),
+    ThemeStatusSchema,
+    async () => {
+      await services.theme.createFromDefaultTemplate();
+      await services.windowManager.applyCustomCss(await services.theme.activeCss());
+      const appliedStatus = services.theme.status;
+      services.tray.updateTheme(appliedStatus.enabled);
+      services.windowManager.sendThemeStatus(appliedStatus);
+      return appliedStatus;
+    }
+  );
+
+  handle(IPC_CHANNELS.themeExportDefault, z.undefined(), z.boolean(), async () => {
+    const result = await dialog.showSaveDialog({
+      title: "导出画猜现场默认主题模板",
+      defaultPath: "drawguess-theme-template.css",
       filters: [{ name: "CSS", extensions: ["css"] }]
     });
-    if (result.canceled || !result.filePaths[0]) {
-      return services.theme.status;
+    if (result.canceled || !result.filePath) {
+      return false;
     }
-    const status = await services.theme.importFromPath(result.filePaths[0]);
-    await services.windowManager.applyCustomCss(await services.theme.activeCss());
-    services.tray.updateTheme(status.enabled);
-    return status;
+    const target = result.filePath.toLowerCase().endsWith(".css")
+      ? result.filePath
+      : `${result.filePath}.css`;
+    await services.theme.exportDefaultTemplate(target);
+    return true;
   });
 
-  handle(IPC_CHANNELS.themeEnable, z.undefined(), ThemeStatusSchema, async () => {
-    const status = await services.theme.enable();
+  handle(IPC_CHANNELS.themeOpenFolder, z.undefined(), z.void(), async () => {
+    const error = await shell.openPath(services.theme.workDirectory);
+    if (error) {
+      throw new Error(`无法打开主题文件夹：${error}`);
+    }
+  });
+
+  handle(IPC_CHANNELS.themeReload, z.undefined(), ThemeStatusSchema, async () => {
+    await services.theme.reload();
     await services.windowManager.applyCustomCss(await services.theme.activeCss());
-    services.tray.updateTheme(status.enabled);
-    return status;
+    const appliedStatus = services.theme.status;
+    services.tray.updateTheme(appliedStatus.enabled);
+    services.windowManager.sendThemeStatus(appliedStatus);
+    return appliedStatus;
+  });
+
+  handle(
+    IPC_CHANNELS.themeSuspend,
+    z.string().trim().min(1).max(1_000),
+    ThemeStatusSchema,
+    async (reason) => {
+      const status = services.theme.suspend(reason);
+      await services.windowManager.applyCustomCss(null);
+      services.tray.updateTheme(false);
+      services.windowManager.sendThemeStatus(status);
+      return status;
+    }
+  );
+
+  handle(IPC_CHANNELS.themeEnable, z.undefined(), ThemeStatusSchema, async () => {
+    await services.theme.enable();
+    await services.windowManager.applyCustomCss(await services.theme.activeCss());
+    const appliedStatus = services.theme.status;
+    services.tray.updateTheme(appliedStatus.enabled);
+    services.windowManager.sendThemeStatus(appliedStatus);
+    return appliedStatus;
   });
 
   handle(IPC_CHANNELS.themeDisable, z.undefined(), ThemeStatusSchema, async () => {
     const status = await services.theme.disable();
     await services.windowManager.applyCustomCss(null);
     services.tray.updateTheme(false);
+    services.windowManager.sendThemeStatus(status);
     return status;
   });
 
@@ -718,6 +788,7 @@ export function registerIpcHandlers(services: IpcServices): () => void {
     const status = await services.theme.delete();
     await services.windowManager.applyCustomCss(null);
     services.tray.updateTheme(false);
+    services.windowManager.sendThemeStatus(status);
     return status;
   });
 

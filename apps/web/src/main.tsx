@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App.js";
 import "./styles.css";
+import { DefaultWebThemeStyle } from "./theme/ThemeStyleLayer.js";
 
 const root = document.querySelector<HTMLDivElement>("#root");
 if (!root) {
@@ -11,6 +12,7 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
+    <DefaultWebThemeStyle />
     <App />
   </StrictMode>
 );

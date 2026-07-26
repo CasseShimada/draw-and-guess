@@ -227,6 +227,8 @@ export function ReferenceCopyModeView({
             <div className="settings-actions">
               <button
                 className="secondary-button"
+                data-action="save-mode-settings"
+                data-ui="secondary-button"
                 onClick={() =>
                   send({
                     type: "mode:settings",
@@ -239,6 +241,11 @@ export function ReferenceCopyModeView({
               </button>
               <button
                 className="primary-button"
+                data-action="start-game"
+                data-critical-kind="action"
+                data-critical-label="开始参考图临摹"
+                data-critical-ui="start-reference-game"
+                data-ui="primary-button"
                 disabled={!canStart}
                 onClick={() => send({ type: "game:start" })}
                 type="button"
@@ -260,7 +267,12 @@ export function ReferenceCopyModeView({
   if (game.phase === "PREPARING" || game.phase === "COUNTDOWN") {
     return (
       <main className="center-stage" data-ui="reference-preparing">
-        <section className="choice-card reference-preparing-card">
+        <section
+          className="choice-card reference-preparing-card"
+          data-critical-kind="content"
+          data-critical-label="参考图与准备倒计时"
+          data-critical-ui="reference-preparing-content"
+        >
           <p className="eyebrow">
             {game.phase === "PREPARING" ? "预加载参考图" : "统一倒计时"}
           </p>
@@ -269,6 +281,10 @@ export function ReferenceCopyModeView({
             <img
               alt="临摹参考图"
               className="reference-image"
+              data-critical-kind="content"
+              data-critical-label="当前临摹参考图"
+              data-critical-ui="reference-image"
+              data-ui="reference-image"
               onLoad={markReferenceReady}
               src={referenceAsset.url}
             />
@@ -301,6 +317,10 @@ export function ReferenceCopyModeView({
               <img
                 alt="临摹参考图"
                 className="reference-image"
+                data-critical-kind="content"
+                data-critical-label="当前临摹参考图"
+                data-critical-ui="reference-image"
+                data-ui="reference-image"
                 src={referenceAsset.url}
               />
             )}
@@ -317,7 +337,13 @@ export function ReferenceCopyModeView({
                 ? "展示收尾：请缩放或平移，完整展示作品"
                 : "并行临摹中"}
             </strong>
-            <span className="timer" data-ui="reference-countdown">
+            <span
+              className="timer"
+              data-critical-kind="content"
+              data-critical-label="临摹剩余时间"
+              data-critical-ui="reference-timer"
+              data-ui="timer"
+            >
               {formatDuration(
                 selfDrawing?.status === "finalizing"
                   ? finalizationCountdown
@@ -333,6 +359,11 @@ export function ReferenceCopyModeView({
           {selfDrawing?.status === "drawing" && (
             <button
               className="primary-button"
+              data-action="finish-drawing"
+              data-critical-kind="action"
+              data-critical-label="完成临摹"
+              data-critical-ui="finish-reference-drawing"
+              data-ui="primary-button"
               onClick={() =>
                 send({
                   type: "drawing:finish",
@@ -386,6 +417,10 @@ export function ReferenceCopyModeView({
               <img
                 alt={`匿名临摹作品 ${safeBallotIndex + 1}`}
                 className="reference-image"
+                data-critical-kind="content"
+                data-critical-label="当前匿名投票作品"
+                data-critical-ui="reference-ballot-image"
+                data-ui="ballot-image"
                 src={ballotAsset.url}
               />
             ) : (
@@ -395,6 +430,10 @@ export function ReferenceCopyModeView({
               <>
                 <label className="like-toggle">
                   <input
+                    data-critical-kind="input"
+                    data-critical-label="作品点赞选项"
+                    data-critical-ui="reference-like-input"
+                    data-ui="vote-input"
                     checked={ballotItem.liked}
                     onChange={(event) =>
                       send({
@@ -452,6 +491,11 @@ export function ReferenceCopyModeView({
                   </button>
                   <button
                     className="primary-button"
+                    data-action="finish-voting"
+                    data-critical-kind="action"
+                    data-critical-label="完成匿名投票"
+                    data-critical-ui="finish-reference-voting"
+                    data-ui="primary-button"
                     onClick={() =>
                       send({
                         type: "reference:finish-ballot",
@@ -499,6 +543,11 @@ export function ReferenceCopyModeView({
       {isHost && (
         <button
           className="primary-button"
+          data-action="return-to-lobby"
+          data-critical-kind="action"
+          data-critical-label="返回临摹模式大厅"
+          data-critical-ui="return-reference-lobby"
+          data-ui="primary-button"
           onClick={() => send({ type: "game:return-lobby" })}
           type="button"
         >

@@ -1,6 +1,6 @@
 {
   "name": "draw-guess",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.17.0",
@@ -12,14 +12,16 @@
     "dev": "corepack pnpm build:packages && corepack pnpm --filter @draw-guess/web build && corepack pnpm --filter @draw-guess/server build && corepack pnpm --filter @draw-guess/desktop dev",
     "desktop:dev": "corepack pnpm dev",
     "dev:web": "corepack pnpm build:packages && concurrently -k -n server,web -c cyan,magenta \"corepack pnpm --filter @draw-guess/server dev\" \"corepack pnpm --filter @draw-guess/web dev\"",
-    "build": "corepack pnpm build:packages && corepack pnpm --filter @draw-guess/web build && corepack pnpm --filter @draw-guess/server build && corepack pnpm --filter @draw-guess/desktop build",
+    "build": "corepack pnpm theme:build-template && corepack pnpm build:packages && corepack pnpm --filter @draw-guess/web build && corepack pnpm --filter @draw-guess/server build && corepack pnpm --filter @draw-guess/desktop build",
     "desktop:package": "corepack pnpm build && corepack pnpm --filter @draw-guess/desktop package",
     "desktop:make": "corepack pnpm build && corepack pnpm --filter @draw-guess/desktop make && corepack pnpm --filter @draw-guess/desktop checksums",
     "desktop:smoke": "corepack pnpm --filter @draw-guess/desktop test:e2e",
+    "theme:build-template": "node apps/desktop/scripts/build-theme-template.mjs",
+    "theme:validate-template": "node apps/desktop/scripts/build-theme-template.mjs --check",
     "test": "vitest run",
     "lint": "eslint . && prettier --check .",
     "typecheck": "corepack pnpm -r typecheck",
-    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
+    "check": "corepack pnpm theme:validate-template && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
     "format": "prettier --write ."
   },
   "devDependencies": {

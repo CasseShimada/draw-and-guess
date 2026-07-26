@@ -22,7 +22,7 @@ function connectionInfoResponse(): Response {
   return new Response(
     JSON.stringify({
       service: "draw-guess",
-      appVersion: "0.5.7",
+      appVersion: "0.5.8",
       protocolVersion: PROTOCOL_VERSION,
       serverInstanceId: "i".repeat(43),
       now: Date.now(),

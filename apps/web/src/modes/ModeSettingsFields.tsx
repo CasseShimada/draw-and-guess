@@ -20,6 +20,8 @@ export function ModeSettingsFields({
           <label>
             绘画时间
             <input
+              data-setting="drawing-seconds"
+              data-ui="number-input"
               disabled={disabled}
               max={180}
               min={15}
@@ -39,6 +41,8 @@ export function ModeSettingsFields({
           <label>
             选词时间
             <input
+              data-setting="selection-seconds"
+              data-ui="number-input"
               disabled={disabled}
               max={60}
               min={5}
@@ -58,6 +62,8 @@ export function ModeSettingsFields({
           <label>
             轮数
             <input
+              data-setting="rounds"
+              data-ui="number-input"
               disabled={disabled}
               max={5}
               min={1}
@@ -88,6 +94,8 @@ export function ModeSettingsFields({
             </label>
             <input
               aria-label="临摹时长滑块"
+              data-setting="duration-seconds"
+              data-ui="range-input"
               disabled={disabled}
               id={rangeId}
               max={10_800}
@@ -107,6 +115,8 @@ export function ModeSettingsFields({
             />
             <label htmlFor={exactId}>精确秒数（1～10800）</label>
             <input
+              data-setting="duration-seconds-exact"
+              data-ui="number-input"
               disabled={disabled}
               id={exactId}
               inputMode="numeric"
@@ -135,6 +145,8 @@ export function ModeSettingsFields({
           <label>
             盲选秒数
             <input
+              data-setting="voting-seconds"
+              data-ui="number-input"
               disabled={disabled}
               max={600}
               min={10}
@@ -160,6 +172,8 @@ export function ModeSettingsFields({
           <label>
             绘画秒数
             <input
+              data-setting="drawing-seconds"
+              data-ui="number-input"
               disabled={disabled}
               max={10_800}
               min={1}
@@ -179,6 +193,8 @@ export function ModeSettingsFields({
           <label>
             猜词秒数
             <input
+              data-setting="guessing-seconds"
+              data-ui="number-input"
               disabled={disabled}
               max={600}
               min={1}

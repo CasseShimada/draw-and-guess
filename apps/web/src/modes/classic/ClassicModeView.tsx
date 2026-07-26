@@ -92,6 +92,8 @@ export function ClassicModeView({
             <div className="settings-actions">
               <button
                 className="secondary-button"
+                data-action="save-mode-settings"
+                data-ui="secondary-button"
                 onClick={() =>
                   send({
                     type: "mode:settings",
@@ -104,6 +106,11 @@ export function ClassicModeView({
               </button>
               <button
                 className="primary-button"
+                data-action="start-game"
+                data-critical-kind="action"
+                data-critical-label="开始经典画猜"
+                data-critical-ui="start-classic-game"
+                data-ui="primary-button"
                 disabled={game.wordPool.uniqueWordCount < 3}
                 onClick={() => send({ type: "game:start" })}
                 type="button"
@@ -123,7 +130,13 @@ export function ClassicModeView({
     );
     return (
       <main className="center-stage" data-ui="classic-word-selection">
-        <div className="stage-counter">
+        <div
+          className="stage-counter"
+          data-critical-kind="content"
+          data-critical-label="选词阶段与剩余时间"
+          data-critical-ui="classic-selection-status"
+          data-ui="timer"
+        >
           <span>第 {game.currentRound} 轮</span>
           <strong>{formatDuration(countdown)}</strong>
         </div>
@@ -134,6 +147,11 @@ export function ClassicModeView({
             <div className="word-options">
               {wordOptions.map((option, index) => (
                 <button
+                  data-action="select-word"
+                  data-critical-kind="action"
+                  data-critical-label={`选择题目：${option.label}`}
+                  data-critical-ui={`classic-word-option-${String(index + 1)}`}
+                  data-ui="word-option"
                   key={option.id}
                   onClick={() => {
                     if (wordOptionsActorStepId) {
@@ -176,7 +194,14 @@ export function ClassicModeView({
             <strong>
               第 {game.currentRound} 轮 · {finalizing ? "展示收尾" : "绘画中"}
             </strong>
-            <div className={`timer ${countdown <= 10 ? "timer--urgent" : ""}`}>
+            <div
+              className={`timer ${countdown <= 10 ? "timer--urgent" : ""}`}
+              data-critical-kind="content"
+              data-critical-label="经典模式剩余时间"
+              data-critical-ui="classic-timer"
+              data-state={countdown <= 10 ? "urgent" : "normal"}
+              data-ui="timer"
+            >
               <small>{finalizing ? "收尾剩余" : "剩余"}</small>
               <strong>
                 {formatDuration(finalizing ? finalizationSeconds : countdown)}
@@ -205,6 +230,11 @@ export function ClassicModeView({
           {isDrawer && game.phase === "DRAWING" && drawing?.status === "drawing" && (
             <button
               className="primary-button"
+              data-action="finish-drawing"
+              data-critical-kind="action"
+              data-critical-label="完成绘制"
+              data-critical-ui="finish-classic-drawing"
+              data-ui="primary-button"
               onClick={() =>
                 send({
                   type: "drawing:finish",
@@ -295,6 +325,11 @@ export function ClassicModeView({
       {isHost && (
         <button
           className="primary-button"
+          data-action="return-to-lobby"
+          data-critical-kind="action"
+          data-critical-label="返回经典模式大厅"
+          data-critical-ui="return-classic-lobby"
+          data-ui="primary-button"
           onClick={() => send({ type: "game:return-lobby" })}
           type="button"
         >

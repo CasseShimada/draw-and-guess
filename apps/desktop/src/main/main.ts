@@ -249,7 +249,7 @@ async function runSmokeCheck(
     ].join("\n"),
     "utf8"
   );
-  await theme.importFromPath(themeCssPath);
+  await theme.importFromPath(themeCssPath, "override");
   const activeThemeCss = await theme.activeCss();
   await windowManager.applyCustomCss(activeThemeCss);
   const themeAssetUrl = activeThemeCss?.match(
@@ -419,12 +419,12 @@ async function runSmokeCheck(
             .querySelector('[data-ui="room-code-copy"] code')
             ?.textContent?.trim();
           const homeBeforeConfirmation = Boolean(
-            document.querySelector('[data-ui="home"]')
+            document.querySelector('[data-ui="home-screen"]')
           );
           confirmButton.click();
           const inspectHome = () => {
             const homeAfterConfirmation = Boolean(
-              document.querySelector('[data-ui="home"]')
+              document.querySelector('[data-ui="home-screen"]')
             );
             const roomCodeHiddenAfterConfirmation =
               document.querySelector('[data-ui="room-code-copy"]') === null;
@@ -460,7 +460,7 @@ async function runSmokeCheck(
             confirmationActionVisible: Boolean(confirmButton),
             heldRoomUntilConfirmation: false,
             homeAfterConfirmation: Boolean(
-              document.querySelector('[data-ui="home"]')
+              document.querySelector('[data-ui="home-screen"]')
             ),
             roomCodeHiddenAfterConfirmation:
               document.querySelector('[data-ui="room-code-copy"]') === null
@@ -694,6 +694,75 @@ async function runSmokeCheck(
     taggedNicknames: rotatedNicknames,
     uniqueNicknames: new Set(rotatedNicknames).size === rotatedNicknames.length
   };
+  const inGameThemePath = path.join(themeSource, "in-game-theme-switch.css");
+  writeFileSync(
+    inGameThemePath,
+    ["/* Theme API Version: 1 */", ":root { --smoke-game-theme-switch: active; }"].join(
+      "\n"
+    ),
+    "utf8"
+  );
+  await theme.importFromPath(inGameThemePath, "override");
+  await windowManager.applyCustomCss(await theme.activeCss());
+  windowManager.sendThemeStatus(theme.status);
+  const inGameThemeSwitch = (await window.webContents.executeJavaScript(
+    `(async () => {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const root = document.querySelector('[data-ui="theme-root"]');
+        const marker = root
+          ? getComputedStyle(root)
+              .getPropertyValue("--smoke-game-theme-switch")
+              .trim()
+          : null;
+        const roomCode = document
+          .querySelector('[data-ui="room-code-copy"] code')
+          ?.textContent?.trim();
+        const connectionState = document
+          .querySelector('[data-ui="connection-status"]')
+          ?.getAttribute("data-state");
+        const status = await window.drawGuessDesktop.theme.status();
+        if (
+          marker === "active" &&
+          roomCode === ${JSON.stringify(autoLocalCreate.roomCode)} &&
+          connectionState === "connected" &&
+          status.enabled &&
+          status.applyMode === "override"
+        ) {
+          const bootstrap = await window.drawGuessDesktop.bootstrap();
+          return {
+            appliedWithoutReload: true,
+            marker,
+            roomCode,
+            connectionState,
+            serverInstanceId: bootstrap.server.serverInstanceId,
+            defaultLayerPresent: Boolean(
+              document.querySelector(
+                'style[data-style-layer="default-desktop-template"]'
+              )
+            )
+          };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return {
+        appliedWithoutReload: false,
+        marker: null,
+        roomCode: null,
+        connectionState: null,
+        serverInstanceId: null,
+        defaultLayerPresent: false
+      };
+    })()`,
+    true
+  )) as {
+    appliedWithoutReload?: unknown;
+    marker?: unknown;
+    roomCode?: unknown;
+    connectionState?: unknown;
+    serverInstanceId?: unknown;
+    defaultLayerPresent?: unknown;
+  };
   const closedRoomUi = (await window.webContents.executeJavaScript(
     `(async () => {
       document.querySelector('button[aria-label="关闭诊断"]')?.click();
@@ -722,7 +791,9 @@ async function runSmokeCheck(
       const result = await new Promise((resolve) => {
         const deadline = Date.now() + 5_000;
         const inspect = async () => {
-          const homeVisible = Boolean(document.querySelector('[data-ui="home"]'));
+          const homeVisible = Boolean(
+            document.querySelector('[data-ui="home-screen"]')
+          );
           const roomCodeHidden =
             document.querySelector('[data-ui="room-code-copy"]') === null;
           if ((homeVisible && roomCodeHidden) || Date.now() >= deadline) {
@@ -775,6 +846,187 @@ async function runSmokeCheck(
     ...closedRoomUi,
     joinStatus: closedRoomJoinResponse?.status ?? null
   };
+  const packagedTemplate = await theme.defaultTemplateCss();
+  const templateRuntime = {
+    byteLength: Buffer.byteLength(packagedTemplate, "utf8"),
+    hasVersionHeader: packagedTemplate.includes("Theme API Version: 1"),
+    hasReplaceHeader: packagedTemplate.includes("Apply Mode: replace"),
+    hasWebHooks:
+      packagedTemplate.includes('[data-ui="home-screen"]') &&
+      packagedTemplate.includes('[data-ui="drawing-board"]'),
+    hasDesktopHooks:
+      packagedTemplate.includes('[data-ui="settings-panel"]') &&
+      packagedTemplate.includes('[data-ui="theme-preview"]'),
+    excludesSafetyHosts:
+      !packagedTemplate.includes('[data-ui="theme-safety-host"]') &&
+      !packagedTemplate.includes('[data-ui="sharing-safety"]')
+  };
+
+  const recoverableCssPath = path.join(themeSource, "recoverable-hidden-action.css");
+  writeFileSync(
+    recoverableCssPath,
+    [
+      "/* Theme API Version: 1 */",
+      '[data-critical-kind="action"] { display: none !important; }'
+    ].join("\n"),
+    "utf8"
+  );
+  await theme.importFromPath(recoverableCssPath, "override");
+  await windowManager.applyCustomCss(await theme.activeCss());
+  windowManager.sendThemeStatus(theme.status);
+  const recoverableTheme = (await window.webContents.executeJavaScript(
+    `(async () => {
+      const deadline = Date.now() + 8_000;
+      while (Date.now() < deadline) {
+        const host = document.querySelector("#drawguess-theme-safety-host");
+        const shadow = host?.shadowRoot;
+        const launcher = shadow?.querySelector(".launcher");
+        const fallback = [...(shadow?.querySelectorAll(".fallback button") ?? [])]
+          .find((button) => button.textContent?.includes("备用操作"));
+        const status = await window.drawGuessDesktop.theme.status();
+        if (status.enabled && fallback && launcher) {
+          const bounds = launcher.getBoundingClientRect();
+          const hit = shadow.elementFromPoint(
+            bounds.left + bounds.width / 2,
+            bounds.top + bounds.height / 2
+          );
+          return {
+            status,
+            hostOutsideThemeRoot:
+              !document.querySelector('[data-ui="theme-root"]')?.contains(host),
+            shadowRootAvailable: Boolean(shadow),
+            launcherVisible:
+              bounds.width >= 4 &&
+              bounds.height >= 4 &&
+              getComputedStyle(launcher).display !== "none",
+            launcherClickable:
+              getComputedStyle(launcher).pointerEvents !== "none" &&
+              (hit === launcher || launcher.contains(hit)),
+            fallbackVisible: true,
+            fallbackLabel: fallback.textContent?.trim() ?? null
+          };
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return {
+        status: await window.drawGuessDesktop.theme.status(),
+        hostOutsideThemeRoot: false,
+        shadowRootAvailable: false,
+        launcherVisible: false,
+        launcherClickable: false,
+        fallbackVisible: false,
+        fallbackLabel: null
+      };
+    })()`,
+    true
+  )) as {
+    status?: { enabled?: unknown; safeMode?: unknown };
+    hostOutsideThemeRoot?: unknown;
+    shadowRootAvailable?: unknown;
+    launcherVisible?: unknown;
+    launcherClickable?: unknown;
+    fallbackVisible?: unknown;
+    fallbackLabel?: unknown;
+  };
+
+  const destructiveCssPath = path.join(themeSource, "destructive-theme.css");
+  writeFileSync(
+    destructiveCssPath,
+    [
+      "/* Theme API Version: 1 */",
+      "* {",
+      "  display: none !important;",
+      "  opacity: 0 !important;",
+      "  pointer-events: none !important;",
+      "}"
+    ].join("\n"),
+    "utf8"
+  );
+  await theme.importFromPath(destructiveCssPath, "replace");
+  await windowManager.applyCustomCss(await theme.activeCss());
+  windowManager.sendThemeStatus(theme.status);
+  const destructiveTheme = (await window.webContents.executeJavaScript(
+    `(async () => {
+      const deadline = Date.now() + 8_000;
+      let suspendedStatus = null;
+      let shadow = null;
+      let keepDisabled = null;
+      while (Date.now() < deadline) {
+        const status = await window.drawGuessDesktop.theme.status();
+        const host = document.querySelector("#drawguess-theme-safety-host");
+        shadow = host?.shadowRoot ?? null;
+        keepDisabled = [...(shadow?.querySelectorAll("button") ?? [])]
+          .find((button) => button.textContent?.includes("保持禁用")) ?? null;
+        const defaultLayerRestored = Boolean(
+          document.querySelector(
+            'style[data-style-layer="default-desktop-template"]'
+          )
+        );
+        if (
+          status.safeMode &&
+          !status.enabled &&
+          keepDisabled &&
+          defaultLayerRestored &&
+          shadow?.textContent?.includes("主题已被自动暂停")
+        ) {
+          suspendedStatus = status;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const host = document.querySelector("#drawguess-theme-safety-host");
+      shadow = host?.shadowRoot ?? shadow;
+      keepDisabled ??= [...(shadow?.querySelectorAll("button") ?? [])]
+        .find((button) => button.textContent?.includes("保持禁用")) ?? null;
+      const root = document.querySelector('[data-ui="theme-root"]');
+      const rootStyle = root ? getComputedStyle(root) : null;
+      const beforeRestore = {
+        status: suspendedStatus ?? await window.drawGuessDesktop.theme.status(),
+        warningVisible:
+          shadow?.textContent?.includes("主题已被自动暂停") === true,
+        recoveryActionVisible: Boolean(keepDisabled),
+        defaultLayerRestored: Boolean(
+          document.querySelector(
+            'style[data-style-layer="default-desktop-template"]'
+          )
+        ),
+        rootVisible:
+          Boolean(root) &&
+          rootStyle?.display !== "none" &&
+          Number.parseFloat(rootStyle?.opacity || "1") > 0.05
+      };
+      keepDisabled?.click();
+      let restoredStatus = await window.drawGuessDesktop.theme.status();
+      const restoreDeadline = Date.now() + 5_000;
+      while (
+        Date.now() < restoreDeadline &&
+        (restoredStatus.enabled || restoredStatus.safeMode)
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        restoredStatus = await window.drawGuessDesktop.theme.status();
+      }
+      const bootstrap = await window.drawGuessDesktop.bootstrap();
+      return {
+        ...beforeRestore,
+        restoreClicked: Boolean(keepDisabled),
+        restoredStatus,
+        customCssPersistentlyDisabled:
+          bootstrap.settings.customCssEnabled === false,
+        serverInstanceId: bootstrap.server.serverInstanceId
+      };
+    })()`,
+    true
+  )) as {
+    status?: { enabled?: unknown; safeMode?: unknown };
+    warningVisible?: unknown;
+    recoveryActionVisible?: unknown;
+    defaultLayerRestored?: unknown;
+    rootVisible?: unknown;
+    restoreClicked?: unknown;
+    restoredStatus?: { enabled?: unknown; safeMode?: unknown };
+    customCssPersistentlyDisabled?: unknown;
+    serverInstanceId?: unknown;
+  };
   writeFileSync(
     resultPath,
     `${JSON.stringify(
@@ -805,6 +1057,31 @@ async function runSmokeCheck(
           captureUi.disabledReadable === true &&
           themeRuntime.assetLoaded &&
           themeRuntime.marker === "packaged-theme-ready" &&
+          templateRuntime.byteLength > 50_000 &&
+          templateRuntime.hasVersionHeader &&
+          templateRuntime.hasReplaceHeader &&
+          templateRuntime.hasWebHooks &&
+          templateRuntime.hasDesktopHooks &&
+          templateRuntime.excludesSafetyHosts &&
+          recoverableTheme.status?.enabled === true &&
+          recoverableTheme.status?.safeMode === false &&
+          recoverableTheme.hostOutsideThemeRoot === true &&
+          recoverableTheme.shadowRootAvailable === true &&
+          recoverableTheme.launcherVisible === true &&
+          recoverableTheme.launcherClickable === true &&
+          recoverableTheme.fallbackVisible === true &&
+          destructiveTheme.status?.enabled === false &&
+          destructiveTheme.status?.safeMode === true &&
+          destructiveTheme.warningVisible === true &&
+          destructiveTheme.recoveryActionVisible === true &&
+          destructiveTheme.defaultLayerRestored === true &&
+          destructiveTheme.rootVisible === true &&
+          destructiveTheme.restoreClicked === true &&
+          destructiveTheme.restoredStatus?.enabled === false &&
+          destructiveTheme.restoredStatus?.safeMode === false &&
+          destructiveTheme.customCssPersistentlyDisabled === true &&
+          destructiveTheme.serverInstanceId ===
+            autoLocalCreate.server.serverInstanceId &&
           typeof autoLocalCreate.roomCode === "string" &&
           autoLocalCreate.target.host === "127.0.0.1" &&
           autoLocalCreate.target.port === 32_100 &&
@@ -855,6 +1132,13 @@ async function runSmokeCheck(
             /#\d{4}$/u.test(nickname)
           ) &&
           rotatedPassword.uniqueNicknames &&
+          inGameThemeSwitch.appliedWithoutReload === true &&
+          inGameThemeSwitch.marker === "active" &&
+          inGameThemeSwitch.roomCode === autoLocalCreate.roomCode &&
+          inGameThemeSwitch.connectionState === "connected" &&
+          inGameThemeSwitch.serverInstanceId ===
+            autoLocalCreate.server.serverInstanceId &&
+          inGameThemeSwitch.defaultLayerPresent === true &&
           closedRoom.closeActionVisible === true &&
           closedRoom.homeVisible === true &&
           closedRoom.roomCodeHidden === true &&
@@ -874,11 +1158,15 @@ async function runSmokeCheck(
         roomClosureConfirmationUi,
         hostRoomRuntime,
         rotatedPassword,
+        inGameThemeSwitch,
         closedRoom,
         theme: {
           status: theme.status,
           runtime: themeRuntime,
-          assetUrl: themeAssetUrl ?? null
+          assetUrl: themeAssetUrl ?? null,
+          templateRuntime,
+          recoverableTheme,
+          destructiveTheme
         }
       },
       null,
@@ -899,7 +1187,12 @@ async function boot(): Promise<void> {
   const logger = new RedactingLogger(path.join(app.getPath("userData"), "logs"));
   const settings = new SettingsService(app.getPath("userData"), encryptionProvider());
   await settings.initialize();
-  const theme = new ThemeService(app.getPath("userData"), settings, logger);
+  const theme = new ThemeService(
+    app.getPath("userData"),
+    settings,
+    logger,
+    path.join(app.getAppPath(), "assets", "drawguess-theme-template.css")
+  );
   const safeThemeStartup =
     process.argv.includes("--safe-mode") ||
     process.argv.includes("--disable-custom-css");
@@ -958,6 +1251,7 @@ async function boot(): Promise<void> {
       .then(async () => {
         await windowManager.applyCustomCss(null);
         tray.updateTheme(false);
+        windowManager.sendThemeStatus(theme.status);
         windowManager.showMainWindow();
       })
       .catch((error: unknown) =>

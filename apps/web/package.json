@@ -1,11 +1,12 @@
 {
   "name": "@draw-guess/web",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "type": "module",
   "exports": {
     "./App": "./src/App.tsx",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./theme": "./src/theme/ThemeStyleLayer.tsx"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",

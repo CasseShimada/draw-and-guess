@@ -51,6 +51,7 @@ import {
 } from "@draw-guess/protocol";
 import {
   LocalAvatarSchema,
+  ThemeApplyModeSchema,
   WordPackFileSchema,
   WordPackSelectionSchema,
   WordPackSummarySchema
@@ -372,8 +373,35 @@ const bridge: DesktopBridge = {
   theme: {
     status: () =>
       invoke(IPC_CHANNELS.themeStatus, z.undefined(), ThemeStatusSchema, undefined),
-    import: () =>
-      invoke(IPC_CHANNELS.themeImport, z.undefined(), ThemeStatusSchema, undefined),
+    onStatus: (listener) =>
+      subscribe(IPC_CHANNELS.themeChanged, ThemeStatusSchema, listener),
+    import: (applyMode) =>
+      invoke(
+        IPC_CHANNELS.themeImport,
+        ThemeApplyModeSchema,
+        ThemeStatusSchema,
+        applyMode
+      ),
+    createFromDefault: () =>
+      invoke(
+        IPC_CHANNELS.themeCreateDefault,
+        z.undefined(),
+        ThemeStatusSchema,
+        undefined
+      ),
+    exportDefault: () =>
+      invoke(IPC_CHANNELS.themeExportDefault, z.undefined(), z.boolean(), undefined),
+    openFolder: () =>
+      invoke(IPC_CHANNELS.themeOpenFolder, z.undefined(), z.void(), undefined),
+    reload: () =>
+      invoke(IPC_CHANNELS.themeReload, z.undefined(), ThemeStatusSchema, undefined),
+    suspend: (reason) =>
+      invoke(
+        IPC_CHANNELS.themeSuspend,
+        z.string().trim().min(1).max(1_000),
+        ThemeStatusSchema,
+        reason
+      ),
     enable: () =>
       invoke(IPC_CHANNELS.themeEnable, z.undefined(), ThemeStatusSchema, undefined),
     disable: () =>

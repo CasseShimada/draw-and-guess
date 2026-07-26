@@ -125,6 +125,70 @@ export interface AppProps {
   onSnapshot?: (snapshot: PublicRoomSnapshot | null) => void;
   onServerMessage?: (message: ServerJsonMessage) => void;
   contentServices?: LocalContentServices;
+  embeddedThemeRoot?: boolean;
+  themePlatform?: "web" | "desktop";
+  themeScreenOverride?: string;
+}
+
+function ThemeSurface({
+  children,
+  connection,
+  embedded,
+  phase,
+  mode,
+  platform,
+  screen
+}: {
+  children: ReactNode;
+  connection: ConnectionState;
+  embedded: boolean;
+  phase?: string;
+  mode?: GameModeId;
+  platform: "web" | "desktop";
+  screen: string;
+}) {
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    const root = embedded
+      ? surface?.closest<HTMLElement>('[data-ui="theme-root"]')
+      : surface;
+    if (!root) {
+      return;
+    }
+    root.dataset.platform = platform;
+    root.dataset.screen = screen;
+    root.dataset.connection = connection;
+    if (mode) {
+      root.dataset.mode = mode;
+    } else {
+      delete root.dataset.mode;
+    }
+    if (phase) {
+      root.dataset.phase = phase.toLowerCase();
+    } else {
+      delete root.dataset.phase;
+    }
+  }, [connection, embedded, mode, phase, platform, screen]);
+
+  return (
+    <div
+      className="app-theme-surface"
+      data-connection={connection}
+      data-critical-kind="content"
+      data-critical-label="当前应用页面"
+      data-critical-ui="app-surface"
+      data-mode={mode}
+      data-phase={phase?.toLowerCase()}
+      data-platform={platform}
+      data-screen={screen}
+      data-theme-mode={embedded ? undefined : "default"}
+      data-ui={embedded ? "app-root" : "theme-root"}
+      ref={surfaceRef}
+    >
+      {children}
+    </div>
+  );
 }
 
 const COMMAND_TYPES = new Set([
@@ -223,7 +287,12 @@ function StatusDot({ state }: { state: ConnectionState }) {
     offline: "连接断开"
   };
   return (
-    <span className={`connection connection--${state}`} role="status">
+    <span
+      className={`connection connection--${state}`}
+      data-state={state}
+      data-ui="connection-status"
+      role="status"
+    >
       <span className="connection__dot" aria-hidden="true" />
       {labels[state]}
     </span>
@@ -270,8 +339,8 @@ function Home({
   };
 
   return (
-    <main className="home-shell" data-ui="home">
-      <section className="home-intro">
+    <main className="home-shell" data-screen="home" data-ui="home-screen">
+      <section className="home-intro" data-ui="home-intro">
         <div className="brand brand--large">
           <span className="brand__mark" aria-hidden="true">
             画
@@ -312,7 +381,12 @@ function Home({
             词库管理
           </button>
         </div>
-        <div className="entry-tabs" role="tablist" aria-label="进入方式">
+        <div
+          className="entry-tabs"
+          data-ui="entry-tabs"
+          role="tablist"
+          aria-label="进入方式"
+        >
           <button
             className={entryMode === "create" ? "active" : ""}
             onClick={() => setEntryMode("create")}
@@ -332,7 +406,11 @@ function Home({
         </div>
 
         {entryMode === "create" ? (
-          <form className="entry-form" onSubmit={submitCreate}>
+          <form
+            className="entry-form"
+            data-ui="create-room-form"
+            onSubmit={submitCreate}
+          >
             <div>
               <p className="eyebrow">成为今晚的主持人</p>
               <h2>开一个新房间</h2>
@@ -341,6 +419,10 @@ function Home({
             <label>
               你的昵称（将自动添加 #四位数字）
               <input
+                data-critical-kind="input"
+                data-critical-label="创建房间昵称"
+                data-critical-ui="create-nickname-input"
+                data-ui="text-input"
                 name="nickname"
                 maxLength={24}
                 placeholder="例如：小画家"
@@ -351,6 +433,10 @@ function Home({
             <label>
               房间密码
               <input
+                data-critical-kind="input"
+                data-critical-label="创建房间密码"
+                data-critical-ui="create-password-input"
+                data-ui="password-input"
                 name="password"
                 minLength={4}
                 maxLength={128}
@@ -364,12 +450,21 @@ function Home({
                 {error}
               </p>
             )}
-            <button className="primary-button" disabled={busy} type="submit">
+            <button
+              className="primary-button"
+              data-action="create-room"
+              data-critical-kind="action"
+              data-critical-label="创建并进入房间"
+              data-critical-ui="create-room-action"
+              data-ui="primary-button"
+              disabled={busy}
+              type="submit"
+            >
               {busy ? "正在创建…" : "创建并进入"}
             </button>
           </form>
         ) : (
-          <form className="entry-form" onSubmit={submitJoin}>
+          <form className="entry-form" data-ui="join-room-form" onSubmit={submitJoin}>
             <div>
               <p className="eyebrow">朋友已经开场？</p>
               <h2>输入房间连接信息</h2>
@@ -378,6 +473,10 @@ function Home({
             <label>
               六位房间码
               <input
+                data-critical-kind="input"
+                data-critical-label="六位房间码"
+                data-critical-ui="room-code-input"
+                data-ui="room-code-input"
                 name="roomCode"
                 maxLength={6}
                 minLength={6}
@@ -389,6 +488,10 @@ function Home({
             <label>
               你的昵称（将自动添加 #四位数字）
               <input
+                data-critical-kind="input"
+                data-critical-label="加入房间昵称"
+                data-critical-ui="join-nickname-input"
+                data-ui="text-input"
                 name="nickname"
                 maxLength={24}
                 placeholder="例如：猜猜看"
@@ -398,6 +501,10 @@ function Home({
             <label>
               房间密码
               <input
+                data-critical-kind="input"
+                data-critical-label="加入房间密码"
+                data-critical-ui="join-password-input"
+                data-ui="password-input"
                 name="password"
                 minLength={4}
                 maxLength={128}
@@ -411,7 +518,16 @@ function Home({
                 {error}
               </p>
             )}
-            <button className="primary-button" disabled={busy} type="submit">
+            <button
+              className="primary-button"
+              data-action="join-room"
+              data-critical-kind="action"
+              data-critical-label="加入房间"
+              data-critical-ui="join-room-action"
+              data-ui="primary-button"
+              disabled={busy}
+              type="submit"
+            >
               {busy ? "正在加入…" : "加入房间"}
             </button>
           </form>
@@ -488,6 +604,11 @@ function PassControls({
                 targetPlayerId: actor.targetPlayerId
               });
             }}
+            data-action="pass-turn"
+            data-critical-kind="action"
+            data-critical-label={`Pass：${self ? text : (player?.nickname ?? "玩家")}`}
+            data-critical-ui={`pass-${actor.actorStepId}`}
+            data-ui="secondary-button"
             type="button"
           >
             Pass · {self ? text : `${player?.nickname ?? "玩家"}：${text}`}
@@ -508,7 +629,10 @@ export function App({
   topbarAddon,
   onSnapshot,
   onServerMessage,
-  contentServices
+  contentServices,
+  embeddedThemeRoot = false,
+  themePlatform = "web",
+  themeScreenOverride
 }: AppProps = {}) {
   const contentRef = useRef<LocalContentServices | null>(null);
   contentRef.current ??= contentServices ?? createBrowserContentServices();
@@ -1597,36 +1721,59 @@ export function App({
 
   if (wordManagerOpen) {
     return (
-      <WordPackManager onClose={() => setWordManagerOpen(false)} services={content} />
+      <ThemeSurface
+        connection={connection}
+        embedded={embeddedThemeRoot}
+        mode={snapshot?.game.mode}
+        phase={snapshot?.game.phase}
+        platform={themePlatform}
+        screen={themeScreenOverride ?? "word-manager"}
+      >
+        <WordPackManager onClose={() => setWordManagerOpen(false)} services={content} />
+      </ThemeSurface>
     );
   }
   if (loading) {
     return (
-      <main className="loading-screen">
-        <span className="brand__mark">画</span>
-        <p>正在恢复现场…</p>
-      </main>
+      <ThemeSurface
+        connection={connection}
+        embedded={embeddedThemeRoot}
+        platform={themePlatform}
+        screen={themeScreenOverride ?? "loading"}
+      >
+        <main className="loading-screen" data-ui="loading-state">
+          <span className="brand__mark">画</span>
+          <p>正在恢复现场…</p>
+        </main>
+      </ThemeSurface>
     );
   }
   if (!snapshot || !modeProps) {
     return (
-      <Home
-        avatarControl={
-          <AvatarEditor
-            avatar={localAvatar}
-            onChange={setLocalAvatar}
-            services={content}
-          />
-        }
-        busy={busy}
-        error={error}
-        initialEntryMode={initialEntryMode}
-        joinConnectionControl={joinConnectionControl}
-        topbarAddon={topbarAddon}
-        onCreate={createRoom}
-        onJoin={joinRoom}
-        onManageWords={openWordManager}
-      />
+      <ThemeSurface
+        connection={connection}
+        embedded={embeddedThemeRoot}
+        platform={themePlatform}
+        screen={themeScreenOverride ?? "home"}
+      >
+        <Home
+          avatarControl={
+            <AvatarEditor
+              avatar={localAvatar}
+              onChange={setLocalAvatar}
+              services={content}
+            />
+          }
+          busy={busy}
+          error={error}
+          initialEntryMode={initialEntryMode}
+          joinConnectionControl={joinConnectionControl}
+          topbarAddon={topbarAddon}
+          onCreate={createRoom}
+          onJoin={joinRoom}
+          onManageWords={openWordManager}
+        />
+      </ThemeSurface>
     );
   }
 
@@ -1649,277 +1796,313 @@ export function App({
       : 0;
 
   return (
-    <div className="app-shell" data-ui="game-shell">
-      <header className="topbar" data-ui="topbar">
-        <div className="brand">
-          <span className="brand__mark" aria-hidden="true">
-            画
-          </span>
-          <span>
-            <strong>画猜现场</strong>
-            <RoomCodeCopyButton
-              onCopy={() => void copyRoomCode(snapshot.roomCode)}
-              roomCode={snapshot.roomCode}
-            />
-          </span>
-        </div>
-        <div className="topbar__status">
-          <button
-            className="topbar-content-button"
-            onClick={openWordManager}
-            type="button"
-          >
-            词库
-          </button>
-          {isLogicalHost && isLobby ? (
-            <label className="mode-switcher">
-              <span className="sr-only">切换游戏模式</span>
-              <select
-                aria-label="游戏模式"
-                onChange={(event) => switchMode(event.target.value as GameModeId)}
-                value={snapshot.game.mode}
-              >
-                {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => (
-                  <option
-                    disabled={
-                      mode === "draw-relay" &&
-                      snapshot.game.mode !== "draw-relay" &&
-                      !snapshot.replayCapability.available
-                    }
-                    key={mode}
-                    value={mode}
-                  >
-                    {GAME_MODE_LABELS[mode]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <span className="mode-chip">{GAME_MODE_LABELS[snapshot.game.mode]}</span>
-          )}
-          {isLogicalHost && !isLobby && (
+    <ThemeSurface
+      connection={connection}
+      embedded={embeddedThemeRoot}
+      mode={snapshot.game.mode}
+      phase={snapshot.game.phase}
+      platform={themePlatform}
+      screen={
+        themeScreenOverride ??
+        (showRoomSettings ? "room-settings" : isLobby ? "lobby" : "game")
+      }
+    >
+      <div
+        className="app-shell"
+        data-critical-kind="content"
+        data-critical-label="当前游戏页面"
+        data-critical-ui="game-screen"
+        data-mode={snapshot.game.mode}
+        data-phase={snapshot.game.phase.toLowerCase()}
+        data-role={isLogicalHost ? "host" : "player"}
+        data-ui="game-screen"
+      >
+        <header className="topbar" data-ui="topbar">
+          <div className="brand">
+            <span className="brand__mark" aria-hidden="true">
+              画
+            </span>
+            <span>
+              <strong>画猜现场</strong>
+              <RoomCodeCopyButton
+                onCopy={() => void copyRoomCode(snapshot.roomCode)}
+                roomCode={snapshot.roomCode}
+              />
+            </span>
+          </div>
+          <div className="topbar__status">
             <button
               className="topbar-content-button"
-              data-ui="room-settings-toggle"
-              onClick={showRoomSettings ? returnToGame : openRoomSettings}
+              onClick={openWordManager}
               type="button"
             >
-              {showRoomSettings ? "返回游戏" : "返回房间"}
+              词库
             </button>
-          )}
-          {hostControls && snapshot.runControl.status === "running" && (
-            <button
-              className="topbar-content-button"
-              data-ui="actual-host-pause"
-              onClick={() =>
-                void hostControls
-                  .pause(snapshot.roomCode)
-                  .catch((hostError: unknown) =>
-                    notify(hostError instanceof Error ? hostError.message : "暂停失败")
-                  )
-              }
-              type="button"
-            >
-              暂停全场
-            </button>
-          )}
-          {hostControls && snapshot.runControl.status === "paused" && (
-            <button
-              className="topbar-content-button"
-              data-ui="actual-host-resume"
-              onClick={() =>
-                void hostControls
-                  .resume(snapshot.roomCode)
-                  .catch((hostError: unknown) =>
-                    notify(hostError instanceof Error ? hostError.message : "恢复失败")
-                  )
-              }
-              type="button"
-            >
-              恢复全场
-            </button>
-          )}
-          {hostControls?.replay && savedReplayAvailable && (
-            <button
-              className="topbar-content-button"
-              onClick={() =>
-                void hostControls
-                  .replay!.openFile(snapshot.roomCode)
-                  .catch((hostError: unknown) =>
-                    notify(
-                      hostError instanceof Error ? hostError.message : "无法打开回放"
-                    )
-                  )
-              }
-              type="button"
-            >
-              打开上次回放
-            </button>
-          )}
-          {!transport &&
-            notificationsEnabled &&
-            notificationPermission === "default" && (
+            {isLogicalHost && isLobby ? (
+              <label className="mode-switcher">
+                <span className="sr-only">切换游戏模式</span>
+                <select
+                  aria-label="游戏模式"
+                  onChange={(event) => switchMode(event.target.value as GameModeId)}
+                  value={snapshot.game.mode}
+                >
+                  {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => (
+                    <option
+                      disabled={
+                        mode === "draw-relay" &&
+                        snapshot.game.mode !== "draw-relay" &&
+                        !snapshot.replayCapability.available
+                      }
+                      key={mode}
+                      value={mode}
+                    >
+                      {GAME_MODE_LABELS[mode]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <span className="mode-chip">{GAME_MODE_LABELS[snapshot.game.mode]}</span>
+            )}
+            {isLogicalHost && !isLobby && (
               <button
                 className="topbar-content-button"
+                data-action={showRoomSettings ? "return-to-game" : "open-room-settings"}
+                data-critical-kind="action"
+                data-critical-label={showRoomSettings ? "返回游戏" : "返回房间设置"}
+                data-critical-ui="room-settings-toggle"
+                data-ui="room-settings-toggle"
+                onClick={showRoomSettings ? returnToGame : openRoomSettings}
+                type="button"
+              >
+                {showRoomSettings ? "返回游戏" : "返回房间"}
+              </button>
+            )}
+            {hostControls && snapshot.runControl.status === "running" && (
+              <button
+                className="topbar-content-button"
+                data-ui="actual-host-pause"
                 onClick={() =>
-                  void Notification.requestPermission().then(setNotificationPermission)
+                  void hostControls
+                    .pause(snapshot.roomCode)
+                    .catch((hostError: unknown) =>
+                      notify(
+                        hostError instanceof Error ? hostError.message : "暂停失败"
+                      )
+                    )
                 }
                 type="button"
               >
-                开启收尾通知
+                暂停全场
               </button>
             )}
-          {topbarAddon}
-          <span className="phase-label">
-            {PHASE_LABELS[snapshot.game.phase] ?? snapshot.game.phase}
-          </span>
-          <StatusDot state={connection} />
-        </div>
-      </header>
+            {hostControls && snapshot.runControl.status === "paused" && (
+              <button
+                className="topbar-content-button"
+                data-ui="actual-host-resume"
+                onClick={() =>
+                  void hostControls
+                    .resume(snapshot.roomCode)
+                    .catch((hostError: unknown) =>
+                      notify(
+                        hostError instanceof Error ? hostError.message : "恢复失败"
+                      )
+                    )
+                }
+                type="button"
+              >
+                恢复全场
+              </button>
+            )}
+            {hostControls?.replay && savedReplayAvailable && (
+              <button
+                className="topbar-content-button"
+                onClick={() =>
+                  void hostControls
+                    .replay!.openFile(snapshot.roomCode)
+                    .catch((hostError: unknown) =>
+                      notify(
+                        hostError instanceof Error ? hostError.message : "无法打开回放"
+                      )
+                    )
+                }
+                type="button"
+              >
+                打开上次回放
+              </button>
+            )}
+            {!transport &&
+              notificationsEnabled &&
+              notificationPermission === "default" && (
+                <button
+                  className="topbar-content-button"
+                  onClick={() =>
+                    void Notification.requestPermission().then(
+                      setNotificationPermission
+                    )
+                  }
+                  type="button"
+                >
+                  开启收尾通知
+                </button>
+              )}
+            {topbarAddon}
+            <span className="phase-label">
+              {PHASE_LABELS[snapshot.game.phase] ?? snapshot.game.phase}
+            </span>
+            <StatusDot state={connection} />
+          </div>
+        </header>
 
-      {showRoomSettings && roomSettingsDraft ? (
-        <RoomSettingsScreen
-          avatarUrls={avatarUrls}
-          busy={restartSubmitting}
-          draft={roomSettingsDraft}
-          onChange={changeRoomSettings}
-          onRestart={restartGame}
-          onRestore={restoreRoomSettings}
-          onReturnToGame={returnToGame}
-          onSwitchMode={switchMode}
-          phaseLabel={PHASE_LABELS[snapshot.game.phase] ?? snapshot.game.phase}
-          snapshot={snapshot}
-        />
-      ) : (
-        <>
-          {resumeDelay > 0 && (
-            <div className="resume-banner" role="status">
-              全场已恢复，采集将在 {resumeDelay} 秒后继续。
-            </div>
-          )}
-          <PassControls send={send} snapshot={snapshot} />
-          {isLobby && isLogicalHost && (
-            <section
-              aria-label="选择游戏模式"
-              className="mode-selection-cards"
-              data-ui="mode-selection-cards"
-            >
-              {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => {
-                const selected = mode === snapshot.game.mode;
-                const capabilityBlocked =
-                  mode === "draw-relay" && !snapshot.replayCapability.available;
-                return (
-                  <button
-                    aria-pressed={selected}
-                    className={
-                      selected
-                        ? "mode-selection-card is-selected"
-                        : "mode-selection-card"
-                    }
-                    disabled={selected || capabilityBlocked}
-                    key={mode}
-                    onClick={() => switchMode(mode)}
-                    type="button"
-                  >
-                    <strong>{GAME_MODE_LABELS[mode]}</strong>
-                    <span>{GAME_MODE_DESCRIPTIONS[mode]}</span>
-                    {mode === "draw-relay" && (
-                      <em className={capabilityBlocked ? "is-unavailable" : ""}>
-                        {snapshot.replayCapability.available
-                          ? `主机 FFmpeg 可用 · ${snapshot.replayCapability.encoder}`
-                          : snapshot.replayCapability.message}
-                      </em>
-                    )}
-                    {selected && <small>当前模式</small>}
-                  </button>
-                );
-              })}
-            </section>
-          )}
-          <ModeRenderer {...modeProps} />
-
-          {isLobby && (
-            <section className="mode-lobby-extras">
-              {lobbyAddon}
-              <section className="panel lobby-profile-panel" data-ui="local-profile">
-                <div className="panel-heading">
-                  <div>
-                    <p className="eyebrow">Local profile</p>
-                    <h2>房间与头像</h2>
-                  </div>
-                  <span className="step-pill">可选</span>
-                </div>
-                <AvatarEditor
-                  avatar={localAvatar}
-                  label="当前房间头像"
-                  onChange={setLocalAvatar}
-                  services={content}
-                />
-              </section>
-            </section>
-          )}
-
-          {snapshot.runControl.status === "paused" && (
-            <div
-              aria-labelledby="pause-title"
-              aria-modal="true"
-              className="pause-overlay"
-              data-ui="pause-overlay"
-              role="dialog"
-            >
-              <section>
-                <p className="eyebrow">Actual server host</p>
-                <h2 id="pause-title">全场已暂停</h2>
-                <p>计时、输入与画面上传均已冻结。保留本地画布，等待服务器主机恢复。</p>
-                <div className="settings-actions">
-                  {isLogicalHost && (
+        {showRoomSettings && roomSettingsDraft ? (
+          <RoomSettingsScreen
+            avatarUrls={avatarUrls}
+            busy={restartSubmitting}
+            draft={roomSettingsDraft}
+            onChange={changeRoomSettings}
+            onRestart={restartGame}
+            onRestore={restoreRoomSettings}
+            onReturnToGame={returnToGame}
+            onSwitchMode={switchMode}
+            phaseLabel={PHASE_LABELS[snapshot.game.phase] ?? snapshot.game.phase}
+            snapshot={snapshot}
+          />
+        ) : (
+          <>
+            {resumeDelay > 0 && (
+              <div className="resume-banner" role="status">
+                全场已恢复，采集将在 {resumeDelay} 秒后继续。
+              </div>
+            )}
+            <PassControls send={send} snapshot={snapshot} />
+            {isLobby && isLogicalHost && (
+              <section
+                aria-label="选择游戏模式"
+                className="mode-selection-cards"
+                data-ui="mode-selection-cards"
+              >
+                {(Object.keys(GAME_MODE_LABELS) as GameModeId[]).map((mode) => {
+                  const selected = mode === snapshot.game.mode;
+                  const capabilityBlocked =
+                    mode === "draw-relay" && !snapshot.replayCapability.available;
+                  return (
                     <button
-                      className="secondary-button"
-                      onClick={openRoomSettings}
-                      type="button"
-                    >
-                      进入房间设置
-                    </button>
-                  )}
-                  {hostControls && (
-                    <button
-                      className="primary-button"
-                      onClick={() =>
-                        void hostControls
-                          .resume(snapshot.roomCode)
-                          .catch((hostError: unknown) =>
-                            notify(
-                              hostError instanceof Error
-                                ? hostError.message
-                                : "恢复失败"
-                            )
-                          )
+                      aria-pressed={selected}
+                      className={
+                        selected
+                          ? "mode-selection-card is-selected"
+                          : "mode-selection-card"
                       }
+                      disabled={selected || capabilityBlocked}
+                      key={mode}
+                      onClick={() => switchMode(mode)}
                       type="button"
                     >
-                      恢复全场
+                      <strong>{GAME_MODE_LABELS[mode]}</strong>
+                      <span>{GAME_MODE_DESCRIPTIONS[mode]}</span>
+                      {mode === "draw-relay" && (
+                        <em className={capabilityBlocked ? "is-unavailable" : ""}>
+                          {snapshot.replayCapability.available
+                            ? `主机 FFmpeg 可用 · ${snapshot.replayCapability.encoder}`
+                            : snapshot.replayCapability.message}
+                        </em>
+                      )}
+                      {selected && <small>当前模式</small>}
                     </button>
-                  )}
-                </div>
+                  );
+                })}
               </section>
-            </div>
-          )}
-        </>
-      )}
+            )}
+            <ModeRenderer {...modeProps} />
 
-      {error && (
-        <button
-          className="toast"
-          data-ui="game-toast"
-          onClick={() => setError(null)}
-          type="button"
-        >
-          {error}
-        </button>
-      )}
-      {roomClosureNotice && (
-        <RoomClosureDialog message={roomClosureNotice} onConfirm={confirmClosedRoom} />
-      )}
-    </div>
+            {isLobby && (
+              <section className="mode-lobby-extras">
+                {lobbyAddon}
+                <section className="panel lobby-profile-panel" data-ui="local-profile">
+                  <div className="panel-heading">
+                    <div>
+                      <p className="eyebrow">Local profile</p>
+                      <h2>房间与头像</h2>
+                    </div>
+                    <span className="step-pill">可选</span>
+                  </div>
+                  <AvatarEditor
+                    avatar={localAvatar}
+                    label="当前房间头像"
+                    onChange={setLocalAvatar}
+                    services={content}
+                  />
+                </section>
+              </section>
+            )}
+
+            {snapshot.runControl.status === "paused" && (
+              <div
+                aria-labelledby="pause-title"
+                aria-modal="true"
+                className="pause-overlay"
+                data-ui="pause-overlay"
+                role="dialog"
+              >
+                <section>
+                  <p className="eyebrow">Actual server host</p>
+                  <h2 id="pause-title">全场已暂停</h2>
+                  <p>
+                    计时、输入与画面上传均已冻结。保留本地画布，等待服务器主机恢复。
+                  </p>
+                  <div className="settings-actions">
+                    {isLogicalHost && (
+                      <button
+                        className="secondary-button"
+                        onClick={openRoomSettings}
+                        type="button"
+                      >
+                        进入房间设置
+                      </button>
+                    )}
+                    {hostControls && (
+                      <button
+                        className="primary-button"
+                        onClick={() =>
+                          void hostControls
+                            .resume(snapshot.roomCode)
+                            .catch((hostError: unknown) =>
+                              notify(
+                                hostError instanceof Error
+                                  ? hostError.message
+                                  : "恢复失败"
+                              )
+                            )
+                        }
+                        type="button"
+                      >
+                        恢复全场
+                      </button>
+                    )}
+                  </div>
+                </section>
+              </div>
+            )}
+          </>
+        )}
+
+        {error && (
+          <button
+            className="toast"
+            data-ui="game-toast"
+            onClick={() => setError(null)}
+            type="button"
+          >
+            {error}
+          </button>
+        )}
+        {roomClosureNotice && (
+          <RoomClosureDialog
+            message={roomClosureNotice}
+            onConfirm={confirmClosedRoom}
+          />
+        )}
+      </div>
+    </ThemeSurface>
   );
 }

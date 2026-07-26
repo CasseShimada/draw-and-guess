@@ -34,6 +34,9 @@ import {
   type DesktopPanel
 } from "./DesktopDock.js";
 import { desktopContentServices } from "./desktop-content-store.js";
+import { DefaultDesktopThemeStyle } from "./theme/DesktopThemeStyle.js";
+import { ThemeSafetyHost } from "./theme/ThemeSafetyHost.js";
+import { ThemePreview } from "./theme/ThemePreview.js";
 
 const EMPTY_CAPTURE: CaptureSummary = {
   ready: false,
@@ -74,7 +77,7 @@ function Onboarding({
     }
   };
   return (
-    <div className="onboarding-backdrop" data-ui="protected-safety">
+    <div className="onboarding-backdrop" data-ui="onboarding">
       <section className="onboarding-card">
         <div className="brand brand--large">
           <span className="brand__mark" aria-hidden="true">
@@ -265,7 +268,8 @@ function ConnectionPanel({
     <section
       aria-hidden={!open}
       className={`desktop-panel connection-panel ${open ? "desktop-panel--open" : ""}`}
-      data-ui="protected-safety"
+      data-ui="connection-panel"
+      hidden={!open}
     >
       <header className="desktop-panel__heading">
         <div>
@@ -637,6 +641,28 @@ function SettingsPanel({
       setMessage(successMessage);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "自定义 CSS 操作失败");
+      try {
+        onThemeChange(await window.drawGuessDesktop.theme.status());
+      } catch {
+        // The original, user-facing operation error remains authoritative.
+      }
+    } finally {
+      setThemeBusy(false);
+    }
+  };
+  const runThemeUtility = async (
+    operation: () => Promise<boolean | void>,
+    successMessage: string
+  ) => {
+    setThemeBusy(true);
+    setMessage(null);
+    try {
+      const completed = await operation();
+      if (completed !== false) {
+        setMessage(successMessage);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "主题文件操作失败");
     } finally {
       setThemeBusy(false);
     }
@@ -682,7 +708,8 @@ function SettingsPanel({
     <section
       aria-hidden={!open}
       className={`desktop-panel ${open ? "desktop-panel--open" : ""}`}
-      data-ui="theme-recovery"
+      data-ui="settings-panel"
+      hidden={!open}
     >
       <header className="desktop-panel__heading">
         <div>
@@ -977,7 +1004,9 @@ function SettingsPanel({
               {theme.safeMode
                 ? "安全模式"
                 : theme.enabled
-                  ? "已启用"
+                  ? theme.applyMode === "replace"
+                    ? "完整替换"
+                    : "覆盖模式"
                   : theme.installed
                     ? "已禁用"
                     : "默认主题"}
@@ -995,6 +1024,20 @@ function SettingsPanel({
                   {(theme.cssBytes / 1024).toFixed(1)} KiB · {theme.assetCount} 个素材
                 </dd>
               </div>
+              <div>
+                <dt>应用模式</dt>
+                <dd>{theme.applyMode === "replace" ? "完整替换" : "默认模板后覆盖"}</dd>
+              </div>
+              <div>
+                <dt>主题接口</dt>
+                <dd>
+                  {theme.themeApiVersion} / 当前 {theme.supportedThemeApiVersion}
+                </dd>
+              </div>
+              <div>
+                <dt>可编辑源文件</dt>
+                <dd>{theme.sourcePath}</dd>
+              </div>
             </dl>
           ) : (
             <p>
@@ -1005,22 +1048,106 @@ function SettingsPanel({
           <div className="theme-actions">
             <button
               className="primary-button"
+              data-action="create-theme-from-template"
+              data-ui="primary-button"
+              disabled={themeBusy}
+              onClick={() => {
+                if (
+                  !theme.installed ||
+                  window.confirm("用默认模板替换当前本地主题工作目录？")
+                ) {
+                  void updateTheme(
+                    () => window.drawGuessDesktop.theme.createFromDefault(),
+                    "已从默认模板创建完整替换主题"
+                  );
+                }
+              }}
+              type="button"
+            >
+              从默认模板创建
+            </button>
+            <button
+              className="secondary-button"
+              data-action="import-replace-theme"
+              data-ui="secondary-button"
               disabled={themeBusy}
               onClick={() =>
                 void updateTheme(
-                  () => window.drawGuessDesktop.theme.import(),
-                  theme.installed
-                    ? "自定义 CSS 已安全替换并启用"
-                    : "自定义 CSS 已导入并启用"
+                  () => window.drawGuessDesktop.theme.import("replace"),
+                  "完整替换主题已原子导入并启用"
                 )
               }
               type="button"
             >
-              {theme.installed ? "替换 CSS…" : "导入 CSS…"}
+              导入完整主题…
             </button>
+            <button
+              className="secondary-button"
+              data-action="import-override-theme"
+              data-ui="secondary-button"
+              disabled={themeBusy}
+              onClick={() =>
+                void updateTheme(
+                  () => window.drawGuessDesktop.theme.import("override"),
+                  "覆盖 CSS 已在默认模板之后启用"
+                )
+              }
+              type="button"
+            >
+              导入覆盖 CSS…
+            </button>
+            <button
+              className="secondary-button"
+              data-action="export-default-template"
+              data-ui="secondary-button"
+              disabled={themeBusy}
+              onClick={() =>
+                void runThemeUtility(
+                  () => window.drawGuessDesktop.theme.exportDefault(),
+                  "默认模板已导出"
+                )
+              }
+              type="button"
+            >
+              导出默认模板…
+            </button>
+            <button
+              className="secondary-button"
+              data-action="open-theme-folder"
+              data-ui="secondary-button"
+              disabled={themeBusy}
+              onClick={() =>
+                void runThemeUtility(
+                  () => window.drawGuessDesktop.theme.openFolder(),
+                  "已打开主题工作目录"
+                )
+              }
+              type="button"
+            >
+              打开主题文件夹
+            </button>
+            {theme.installed && (
+              <button
+                className="secondary-button"
+                data-action="reload-theme"
+                data-ui="secondary-button"
+                disabled={themeBusy}
+                onClick={() =>
+                  void updateTheme(
+                    () => window.drawGuessDesktop.theme.reload(),
+                    "source.css 已重新编译并原子载入"
+                  )
+                }
+                type="button"
+              >
+                重新载入 CSS
+              </button>
+            )}
             {theme.installed && !theme.enabled && (
               <button
                 className="secondary-button"
+                data-action="enable-theme"
+                data-ui="secondary-button"
                 disabled={themeBusy}
                 onClick={() =>
                   void updateTheme(
@@ -1036,6 +1163,8 @@ function SettingsPanel({
             {theme.enabled && (
               <button
                 className="secondary-button"
+                data-action="restore-default-theme"
+                data-ui="secondary-button"
                 disabled={themeBusy}
                 onClick={() =>
                   void updateTheme(
@@ -1045,12 +1174,14 @@ function SettingsPanel({
                 }
                 type="button"
               >
-                禁用并恢复默认
+                恢复默认主题
               </button>
             )}
             {theme.installed && (
               <button
                 className="danger-button"
+                data-action="delete-theme"
+                data-ui="danger-button"
                 disabled={themeBusy}
                 onClick={() => {
                   if (window.confirm("删除这台设备上的自定义 CSS 和已复制素材？")) {
@@ -1067,9 +1198,11 @@ function SettingsPanel({
             )}
           </div>
           <small>
-            若主题导致界面异常，可从系统托盘选择“禁用自定义 CSS（安全恢复）”，
-            或使用安全启动参数。共享停止悬浮窗和本设置面板不受主题影响。
+            直接编辑工作目录中的 source.css 后点击“重新载入 CSS”。失败时 compiled.css
+            与当前可用主题保持不变。右下角 Shadow DOM 安全中心和
+            独立共享停止入口永远不受主题影响。
           </small>
+          <ThemePreview />
         </section>
 
         <section className="control-card danger-card">
@@ -1121,7 +1254,8 @@ function DiagnosticsPanel({ open, onClose }: { open: boolean; onClose: () => voi
     <section
       aria-hidden={!open}
       className={`desktop-panel ${open ? "desktop-panel--open" : ""}`}
-      data-ui="protected-safety"
+      data-ui="diagnostics-panel"
+      hidden={!open}
     >
       <header className="desktop-panel__heading">
         <div>
@@ -1198,6 +1332,7 @@ export function DesktopApp() {
   const [theme, setTheme] = useState<ThemeStatus | null>(null);
   const [snapshot, setSnapshot] = useState<PublicRoomSnapshot | null>(null);
   const [capture, setCapture] = useState<CaptureSummary>(EMPTY_CAPTURE);
+  const [themeRoot, setThemeRoot] = useState<HTMLDivElement | null>(null);
   const [panel, setPanel] = useState<DesktopPanel>(null);
   const [gameViewEpoch, setGameViewEpoch] = useState(0);
   const [homeEntryMode, setHomeEntryMode] = useState<"create" | "join">("create");
@@ -1226,9 +1361,11 @@ export function DesktopApp() {
         setFatalError(error instanceof Error ? error.message : "桌面应用初始化失败");
       });
     const unsubscribeServer = window.drawGuessDesktop.server.onStatus(setServerStatus);
+    const unsubscribeTheme = window.drawGuessDesktop.theme.onStatus(setTheme);
     return () => {
       disposed = true;
       unsubscribeServer();
+      unsubscribeTheme();
     };
   }, []);
 
@@ -1476,9 +1613,23 @@ export function DesktopApp() {
 
   return (
     <div className="desktop-root">
-      <div className="theme-root" data-ui="theme-root">
+      <DefaultDesktopThemeStyle
+        enabled={!(theme.enabled && theme.applyMode === "replace")}
+      />
+      <div
+        className="theme-root"
+        data-connection={snapshot ? "connected" : "offline"}
+        data-mode={snapshot?.game.mode}
+        data-phase={snapshot?.game.phase.toLowerCase()}
+        data-platform="desktop"
+        data-screen={visiblePanel ?? (snapshot ? "game" : "home")}
+        data-theme-mode={theme.enabled ? theme.applyMode : "default"}
+        data-ui="theme-root"
+        ref={setThemeRoot}
+      >
         <GameApp
           contentServices={desktopContentServices}
+          embeddedThemeRoot
           hostControls={hostControls}
           initialEntryMode={homeEntryMode}
           joinConnectionControl={
@@ -1515,69 +1666,93 @@ export function DesktopApp() {
               serverState={serverStatus.state}
             />
           }
+          themePlatform="desktop"
+          themeScreenOverride={visiblePanel ?? undefined}
           transport={transport}
         />
-      </div>
 
-      {visiblePanel && visiblePanel !== "capture" && (
-        <button
-          aria-label="关闭桌面控制面板"
-          className="desktop-panel-backdrop"
-          data-ui="protected-safety"
-          onClick={() => setPanel(null)}
-          type="button"
-        />
-      )}
-      {connectionManagementAvailable && (
-        <ConnectionPanel
+        {visiblePanel && visiblePanel !== "capture" && (
+          <button
+            aria-label="关闭桌面控制面板"
+            className="desktop-panel-backdrop"
+            data-action="close-desktop-panel"
+            data-ui="desktop-panel-backdrop"
+            onClick={() => setPanel(null)}
+            type="button"
+          />
+        )}
+        {connectionManagementAvailable && (
+          <ConnectionPanel
+            onClose={() => setPanel(null)}
+            onSettings={updateSettings}
+            onStart={startServer}
+            onStop={stopServer}
+            onRefreshNetworks={async () => {
+              setServerStatus(await window.drawGuessDesktop.server.refreshNetworks());
+            }}
+            onChangeRoomPassword={(roomCode, password) =>
+              window.drawGuessDesktop.server.changeRoomPassword(roomCode, password)
+            }
+            onCloseRoom={closeRoom}
+            open={visiblePanel === "connection"}
+            roomCode={hostControls && snapshot ? snapshot.roomCode : null}
+            settings={settings}
+            status={serverStatus}
+            platform={bootstrap.platform}
+          />
+        )}
+        <CaptureStudio
           onClose={() => setPanel(null)}
-          onSettings={updateSettings}
-          onStart={startServer}
-          onStop={stopServer}
-          onRefreshNetworks={async () => {
-            setServerStatus(await window.drawGuessDesktop.server.refreshNetworks());
-          }}
-          onChangeRoomPassword={(roomCode, password) =>
-            window.drawGuessDesktop.server.changeRoomPassword(roomCode, password)
-          }
-          onCloseRoom={closeRoom}
-          open={visiblePanel === "connection"}
-          roomCode={hostControls && snapshot ? snapshot.roomCode : null}
+          onSettingsChange={setSettings}
+          onSummary={setCapture}
+          open={visiblePanel === "capture"}
           settings={settings}
-          status={serverStatus}
-          platform={bootstrap.platform}
+          snapshot={snapshot}
         />
-      )}
-      <CaptureStudio
-        onClose={() => setPanel(null)}
-        onSettingsChange={setSettings}
-        onSummary={setCapture}
-        open={visiblePanel === "capture"}
-        settings={settings}
-        snapshot={snapshot}
-      />
-      <SettingsPanel
-        bootstrap={bootstrap}
-        onClose={() => setPanel(null)}
-        onRefreshPermission={async () => {
-          setPermission(await window.drawGuessDesktop.capture.permission());
-        }}
-        onReset={resetLocalData}
-        onSettings={updateSettings}
-        onThemeChange={setTheme}
-        open={visiblePanel === "settings"}
-        permission={permission}
-        settings={settings}
-        theme={theme}
-      />
-      <DiagnosticsPanel
-        onClose={() => setPanel(null)}
-        open={visiblePanel === "diagnostics"}
-      />
+        <SettingsPanel
+          bootstrap={bootstrap}
+          onClose={() => setPanel(null)}
+          onRefreshPermission={async () => {
+            setPermission(await window.drawGuessDesktop.capture.permission());
+          }}
+          onReset={resetLocalData}
+          onSettings={updateSettings}
+          onThemeChange={setTheme}
+          open={visiblePanel === "settings"}
+          permission={permission}
+          settings={settings}
+          theme={theme}
+        />
+        <DiagnosticsPanel
+          onClose={() => setPanel(null)}
+          open={visiblePanel === "diagnostics"}
+        />
 
-      {!settings.onboardingComplete && (
-        <Onboarding bootstrap={bootstrap} onComplete={finishOnboarding} />
-      )}
+        {!settings.onboardingComplete && (
+          <Onboarding bootstrap={bootstrap} onComplete={finishOnboarding} />
+        )}
+      </div>
+      <ThemeSafetyHost
+        captureActive={capture.active}
+        onDisable={async () => {
+          setTheme(await window.drawGuessDesktop.theme.disable());
+        }}
+        onOpenSettings={() => setPanel("settings")}
+        onReload={async () => {
+          setTheme(await window.drawGuessDesktop.theme.reload());
+        }}
+        onRetry={async () => {
+          setTheme(await window.drawGuessDesktop.theme.enable());
+        }}
+        onStopSharing={async () => {
+          await window.drawGuessDesktop.sharing.stop();
+        }}
+        onSuspend={async (reason) => {
+          setTheme(await window.drawGuessDesktop.theme.suspend(reason));
+        }}
+        theme={theme}
+        themeRoot={themeRoot}
+      />
     </div>
   );
 }

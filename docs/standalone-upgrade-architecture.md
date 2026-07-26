@@ -1,6 +1,6 @@
 # 独立桌面版升级架构
 
-状态：`0.5.7` 实施架构，游戏协议版本为 `5`。本文描述当前独立桌面版、三模式框架、实际
+状态：`0.5.8` 实施架构，游戏协议版本仍为 `5`，主题 API 版本为 `1`。本文描述当前独立桌面版、三模式框架、实际
 主机控制和内容安全边界；OBS/Capture Agent 与协议 v1–v3 仅是历史版本。
 
 ## 产品边界
@@ -264,13 +264,22 @@ WebSocket、heartbeat 和重连 timer，旧响应不能进入新目标状态。
 ## 本地内容、设置与生命周期
 
 浏览器内容存 IndexedDB。Electron 只通过具名 IPC 操作 `userData/content/v1`、
-`userData/profile`、`userData/themes/active` 和版本 5 设置；Renderer 没有任意路径
+`userData/profile`、`userData/themes/active` 和版本 6 设置；Renderer 没有任意路径
 API。写入采用同目录临时文件与原子替换，旧设置迁移后补齐 FFmpeg、目录、配额和
 通知默认值。
 
-CSS 导入使用 PostCSS AST、selector/value parser、素材 allowlist 与 realpath 边界，
-并自动限制到 `[data-ui="theme-root"]`。托盘、权限、主题恢复和独立采集悬浮窗受
-保护；`--safe-mode` 与 `--disable-custom-css` 可在窗口创建前禁用。
+默认视觉拆为 Core Safety、Web 默认模板和桌面默认模板；构建时确定性生成可导出的
+单文件模板。CSS 导入区分完整替换与覆盖模式，使用 PostCSS AST、selector/value
+parser、素材 allowlist 与 realpath 边界，并自动限制到
+`[data-ui="theme-root"]`。工作目录保留可编辑 `source.css`、校验后的
+`compiled.css`、manifest 和本地素材；重新加载通过临时目录原子替换，失败继续使用
+上一份编译结果。
+
+普通游戏和桌面设置 UI 通过稳定 `data-ui` 及页面、模式、阶段、状态、角色和操作属性
+开放主题接口。主题根外的 Shadow DOM 安全宿主始终提供禁用、恢复、重新加载和备用
+操作；运行时健康检查发现不可替代的画布、参考图或整页失效时，只暂停本客户端 CSS。
+共享停止按钮继续位于不注入用户 CSS 的独立置顶窗口。托盘恢复、
+`--safe-mode` 与 `--disable-custom-css` 是额外启动前恢复入口。
 
 日志在写入前遮盖密码、Authorization、Cookie、token、题目和 URL 查询秘密；不记录
 图片、参考图、回放 manifest 或本地路径。系统通知只接受固定 schema 事件，并按

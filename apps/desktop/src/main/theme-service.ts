@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
@@ -11,158 +11,112 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import { CONTENT_LIMITS } from "@draw-guess/content";
+import {
+  CONTENT_LIMITS,
+  THEME_API_VERSION,
+  ThemeApplyModeSchema,
+  type ThemeApplyMode
+} from "@draw-guess/content";
 import { protocol } from "electron";
-import postcss, { type AtRule, type Rule } from "postcss";
-import selectorParser from "postcss-selector-parser";
-import valueParser from "postcss-value-parser";
 import { z } from "zod";
 
 import { ThemeStatusSchema, type ThemeStatus } from "../shared/ipc.js";
+import {
+  compileThemeCss,
+  isInside,
+  sha256,
+  THEME_PROTOCOL,
+  themeApiVersionFromSource,
+  type CompiledThemeAsset
+} from "./theme-compiler.js";
 import type { RedactingLogger } from "./redacting-logger.js";
 import type { SettingsService } from "./settings-service.js";
 
-export const THEME_PROTOCOL = "drawguess-theme";
-const THEME_ROOT_SELECTOR = '[data-ui="theme-root"]';
-const ALLOWED_EXTENSIONS = new Set([
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".gif",
-  ".woff",
-  ".woff2"
-]);
-const MIME_TYPES: Readonly<Record<string, string>> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2"
-};
-const PROTECTED_SELECTOR_PATTERN =
-  /data-ui\s*=\s*["']?(?:protected-safety|sharing-safety|theme-recovery)/i;
-const SCRIPT_CSS_PATTERN = /(?:expression\s*\(|javascript\s*:|<\s*script|<\/\s*style)/i;
-const FORBIDDEN_URL_PATTERN =
-  /(?:^|[\s("'=])(?:https?|file|ftp|javascript|data):|(?:^|[\s("'=])\/\//i;
-const ALLOWED_AT_RULES = new Set([
-  "media",
-  "supports",
-  "container",
-  "font-face",
-  "keyframes",
-  "-webkit-keyframes"
+export { THEME_PROTOCOL } from "./theme-compiler.js";
+
+const SOURCE_FILE = "source.css";
+const COMPILED_FILE = "compiled.css";
+const MANIFEST_FILE = "manifest.json";
+const COMPILED_ASSET_DIRECTORY = "assets";
+const HASH_SCHEMA = z.string().regex(/^[a-f0-9]{64}$/u);
+const THEME_ASSET_MIME_SCHEMA = z.enum([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "font/woff",
+  "font/woff2"
 ]);
 
 const ThemeAssetSchema = z
   .object({
-    original: z.string().min(1).max(512),
-    storedName: z.string().regex(/^[a-f0-9]{16}-[A-Za-z0-9._-]+$/),
+    sourcePath: z.string().min(1).max(512),
+    compiledPath: z.string().regex(/^assets\/[a-f0-9]{16}-[A-Za-z0-9._-]+$/u),
     byteLength: z.number().int().positive(),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-    mimeType: z.enum([
-      "image/png",
-      "image/jpeg",
-      "image/webp",
-      "image/gif",
-      "font/woff",
-      "font/woff2"
-    ])
+    sha256: HASH_SCHEMA,
+    mimeType: THEME_ASSET_MIME_SCHEMA
   })
   .strict();
 
-const ThemeManifestSchema = z
+export const ThemeManifestSchema = z
+  .object({
+    schemaVersion: z.literal(2),
+    themeApiVersion: z.number().int().positive(),
+    applyMode: ThemeApplyModeSchema,
+    sourceFile: z.literal(SOURCE_FILE),
+    compiledFile: z.literal(COMPILED_FILE),
+    sourceFileName: z.string().min(1).max(260),
+    sourceBytes: z.number().int().nonnegative().max(CONTENT_LIMITS.themeCssBytes),
+    compiledBytes: z.number().int().nonnegative().max(CONTENT_LIMITS.themeCssBytes),
+    sourceHash: HASH_SCHEMA,
+    compiledHash: HASH_SCHEMA,
+    updatedAt: z.string().datetime({ offset: true }),
+    assets: z.array(ThemeAssetSchema).max(CONTENT_LIMITS.themeAssetFiles)
+  })
+  .strict();
+
+const LegacyThemeAssetSchema = z
+  .object({
+    original: z.string().min(1).max(512),
+    storedName: z.string().regex(/^[a-f0-9]{16}-[A-Za-z0-9._-]+$/u),
+    byteLength: z.number().int().positive(),
+    sha256: HASH_SCHEMA,
+    mimeType: THEME_ASSET_MIME_SCHEMA
+  })
+  .strict();
+
+const LegacyThemeManifestSchema = z
   .object({
     schemaVersion: z.literal(1),
     sourceFileName: z.string().min(1).max(260),
     importedAt: z.string().datetime({ offset: true }),
     cssBytes: z.number().int().positive().max(CONTENT_LIMITS.themeCssBytes),
-    cssSha256: z.string().regex(/^[a-f0-9]{64}$/),
-    assets: z.array(ThemeAssetSchema).max(CONTENT_LIMITS.themeAssetFiles)
+    cssSha256: HASH_SCHEMA,
+    assets: z.array(LegacyThemeAssetSchema).max(CONTENT_LIMITS.themeAssetFiles)
   })
   .strict();
 
-type ThemeManifest = z.infer<typeof ThemeManifestSchema>;
+export type ThemeManifest = z.infer<typeof ThemeManifestSchema>;
 
-function isInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return (
-    relative === "" ||
-    (!relative.startsWith(`..${path.sep}`) &&
-      relative !== ".." &&
-      !path.isAbsolute(relative))
-  );
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "未知主题错误";
 }
 
-function safeAssetBasename(value: string): string {
-  const sanitized = path
-    .basename(value)
-    .normalize("NFKC")
-    .replace(/[^A-Za-z0-9._-]/g, "-")
-    .slice(-100);
-  return sanitized || "asset";
-}
-
-function sha256(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-function singleCssName(value: string, label: string): string {
-  const parsed = valueParser(value);
-  const significant = parsed.nodes.filter(
-    (node) => node.type !== "space" && node.type !== "comment"
-  );
-  if (
-    significant.length !== 1 ||
-    (significant[0]?.type !== "word" && significant[0]?.type !== "string")
-  ) {
-    throw new Error(`${label} 必须使用单一、无转义的名称`);
+function normalizedAssetSegments(reference: string): string[] {
+  const segments = reference
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter((segment) => segment !== ".");
+  if (segments.some((segment) => !segment || segment === "..")) {
+    throw new Error(`主题素材路径无效：${reference}`);
   }
-  const name = significant[0].value.trim();
-  if (!/^[-_A-Za-z][-_A-Za-z0-9 ]{0,80}$/u.test(name)) {
-    throw new Error(`${label} 名称无效`);
-  }
-  return name;
-}
-
-function rewriteCssNames(value: string, names: ReadonlyMap<string, string>): string {
-  if (names.size === 0) {
-    return value;
-  }
-  const parsed = valueParser(value);
-  parsed.walk((node) => {
-    if (node.type !== "word" && node.type !== "string") {
-      return;
-    }
-    const replacement = names.get(node.value);
-    if (replacement) {
-      node.value = replacement;
-    }
-  });
-  return valueParser.stringify(parsed.nodes);
-}
-
-function isKeyframes(rule: Rule): boolean {
-  return (
-    rule.parent?.type === "atrule" &&
-    /^(?:-\w+-)?keyframes$/i.test((rule.parent as AtRule).name)
-  );
-}
-
-interface ValidatedAsset {
-  original: string;
-  sourcePath: string;
-  storedName: string;
-  byteLength: number;
-  sha256: string;
-  mimeType: ThemeManifest["assets"][number]["mimeType"];
+  return segments;
 }
 
 export class ThemeService {
   readonly #themesRoot: string;
   readonly #activeRoot: string;
+  readonly #templatePath: string;
   readonly #settings: SettingsService;
   readonly #logger: RedactingLogger;
   #manifest: ThemeManifest | null = null;
@@ -172,27 +126,42 @@ export class ThemeService {
   constructor(
     userDataPath: string,
     settings: SettingsService,
-    logger: RedactingLogger
+    logger: RedactingLogger,
+    templatePath = path.resolve(
+      process.cwd(),
+      "apps",
+      "desktop",
+      "assets",
+      "drawguess-theme-template.css"
+    )
   ) {
     this.#themesRoot = path.resolve(userDataPath, "themes");
     this.#activeRoot = path.join(this.#themesRoot, "active");
+    this.#templatePath = path.resolve(templatePath);
     this.#settings = settings;
     this.#logger = logger;
   }
 
   get status(): ThemeStatus {
+    const compatible = this.#manifest?.themeApiVersion === THEME_API_VERSION;
     return ThemeStatusSchema.parse({
       installed: Boolean(this.#manifest),
       enabled:
         Boolean(this.#manifest) &&
+        compatible &&
         this.#settings.settings.customCssEnabled &&
         !this.#safeMode,
       fileName: this.#manifest?.sourceFileName ?? null,
-      importedAt: this.#manifest?.importedAt ?? null,
+      importedAt: this.#manifest?.updatedAt ?? null,
       assetCount: this.#manifest?.assets.length ?? 0,
-      cssBytes: this.#manifest?.cssBytes ?? 0,
+      cssBytes: this.#manifest?.compiledBytes ?? 0,
       safeMode: this.#safeMode,
-      error: this.#error
+      error: this.#error,
+      applyMode: this.#manifest?.applyMode ?? null,
+      themeApiVersion: this.#manifest?.themeApiVersion ?? null,
+      supportedThemeApiVersion: THEME_API_VERSION,
+      sourcePath: this.#manifest ? path.join(this.#activeRoot, SOURCE_FILE) : null,
+      workDirectory: this.#manifest ? this.#activeRoot : this.#themesRoot
     });
   }
 
@@ -203,305 +172,155 @@ export class ThemeService {
       await this.#settings.update({ customCssEnabled: false });
     }
     try {
-      this.#manifest = ThemeManifestSchema.parse(
-        JSON.parse(
-          await readFile(path.join(this.#activeRoot, "manifest.json"), "utf8")
-        ) as unknown
-      );
-      const css = await readFile(path.join(this.#activeRoot, "style.css"));
-      if (
-        css.byteLength !== this.#manifest.cssBytes ||
-        sha256(css) !== this.#manifest.cssSha256
-      ) {
-        throw new Error("主题 CSS 与 manifest 校验不一致");
+      const rawManifest = JSON.parse(
+        await readFile(path.join(this.#activeRoot, MANIFEST_FILE), "utf8")
+      ) as unknown;
+      const current = ThemeManifestSchema.safeParse(rawManifest);
+      this.#manifest = current.success
+        ? current.data
+        : await this.#migrateLegacy(LegacyThemeManifestSchema.parse(rawManifest));
+      const sourceChanged = await this.#validateActiveFiles(this.#manifest);
+      if (this.#manifest.themeApiVersion !== THEME_API_VERSION) {
+        this.#safeMode = true;
+        this.#error = `主题接口版本 ${String(
+          this.#manifest.themeApiVersion
+        )} 与当前版本 ${String(THEME_API_VERSION)} 不兼容；源文件已保留`;
+      } else {
+        this.#error = sourceChanged
+          ? "source.css 已在外部修改；当前继续使用上一份 compiled.css，请点击“重新载入 CSS”"
+          : null;
       }
-      this.#error = null;
     } catch (error) {
       this.#manifest = null;
       if (await this.#activeExists()) {
-        this.#error =
-          error instanceof Error ? `本地主题无效：${error.message}` : "本地主题无效";
+        this.#error = `本地主题无效：${errorMessage(error)}`;
       }
     }
   }
 
   async activeCss(): Promise<string | null> {
-    if (!this.status.enabled) {
+    if (!this.status.enabled || !this.#manifest) {
       return null;
     }
     try {
-      const css = await readFile(path.join(this.#activeRoot, "style.css"), "utf8");
+      const css = await readFile(
+        path.join(this.#activeRoot, this.#manifest.compiledFile),
+        "utf8"
+      );
+      const bytes = Buffer.from(css, "utf8");
       if (
-        Buffer.byteLength(css, "utf8") > CONTENT_LIMITS.themeCssBytes ||
-        !this.#manifest ||
-        sha256(Buffer.from(css, "utf8")) !== this.#manifest.cssSha256
+        bytes.byteLength !== this.#manifest.compiledBytes ||
+        sha256(bytes) !== this.#manifest.compiledHash
       ) {
-        throw new Error("主题 CSS 校验失败");
+        throw new Error("主题 compiled.css 与 manifest 校验不一致");
       }
       return css;
     } catch (error) {
-      this.#error = error instanceof Error ? error.message : "主题 CSS 读取失败";
+      this.#safeMode = true;
+      this.#error = `主题 CSS 读取失败：${errorMessage(error)}`;
       return null;
     }
   }
 
-  async importFromPath(cssPathInput: string): Promise<ThemeStatus> {
+  async importFromPath(
+    cssPathInput: string,
+    applyMode: ThemeApplyMode
+  ): Promise<ThemeStatus> {
     const cssPath = path.resolve(cssPathInput);
-    const cssInfo = await stat(cssPath);
+    const info = await stat(cssPath);
     if (
-      !cssInfo.isFile() ||
+      !info.isFile() ||
       path.extname(cssPath).toLowerCase() !== ".css" ||
-      cssInfo.size < 1 ||
-      cssInfo.size > CONTENT_LIMITS.themeCssBytes
+      info.size > CONTENT_LIMITS.themeCssBytes
     ) {
-      throw new Error("CSS 文件必须是 1 字节到 512 KiB 的 .css 文件");
+      throw new Error("CSS 文件必须是不超过 512 KiB 的 .css 文件");
     }
     const sourceRoot = await realpath(path.dirname(cssPath));
-    const cssText = await readFile(cssPath, "utf8");
-    if (SCRIPT_CSS_PATTERN.test(cssText)) {
-      throw new Error("CSS 包含脚本、HTML 或不安全协议");
-    }
-    const parsed = postcss.parse(cssText, { from: cssPath });
-    const assets = new Map<string, ValidatedAsset>();
-    const namespace = sha256(Buffer.from(cssText, "utf8")).slice(0, 12);
-    const globalNames = new Map<string, string>();
-
-    parsed.walkAtRules((atRule) => {
-      const name = atRule.name.toLowerCase();
-      if (name === "import") {
-        throw atRule.error("自定义 CSS 不允许 @import");
-      }
-      if (
-        !ALLOWED_AT_RULES.has(name) ||
-        /\burl\s*\(/iu.test(atRule.params) ||
-        FORBIDDEN_URL_PATTERN.test(atRule.params)
-      ) {
-        throw atRule.error("CSS at-rule 包含不允许的 URL 或作用域");
-      }
-      if (name === "keyframes" || name === "-webkit-keyframes") {
-        const original = singleCssName(atRule.params, "@keyframes");
-        const scoped = `dg-theme-${namespace}-${original.replaceAll(" ", "-")}`;
-        globalNames.set(original, scoped);
-        atRule.params = scoped;
-      } else if (name === "font-face") {
-        const family = atRule.nodes?.find(
-          (node) => node.type === "decl" && node.prop.toLowerCase() === "font-family"
-        );
-        if (!family || family.type !== "decl") {
-          throw atRule.error("@font-face 必须声明 font-family");
-        }
-        const original = singleCssName(family.value, "@font-face font-family");
-        const scoped = `dg-theme-${namespace}-${original.replaceAll(" ", "-")}`;
-        globalNames.set(original, scoped);
-        family.value = `"${scoped}"`;
-      }
+    const source = await readFile(cssPath, "utf8");
+    return this.#installSource({
+      source,
+      sourceRoot,
+      sourceFileName: path.basename(cssPath),
+      applyMode,
+      enableAfterInstall: true
     });
+  }
 
-    const rewriteValue = async (rawValue: string): Promise<string> => {
-      const ast = valueParser(rawValue);
-      const pending: Promise<void>[] = [];
-      ast.walk((node) => {
-        if (node.type !== "function" || node.value.toLowerCase() !== "url") {
-          return;
-        }
-        const raw = valueParser.stringify(node.nodes).trim();
-        const unquoted = raw.replace(/^(["'])(.*)\1$/s, "$2").trim();
-        if (!unquoted || unquoted.startsWith("#")) {
-          return;
-        }
-        pending.push(
-          this.#validateAsset(sourceRoot, unquoted).then((asset) => {
-            assets.set(asset.sourcePath, asset);
-            node.nodes = [
-              {
-                type: "word",
-                value: `${THEME_PROTOCOL}://active/assets/${asset.storedName}`,
-                sourceIndex: 0,
-                sourceEndIndex: 0
-              }
-            ];
-          })
-        );
-      });
-      await Promise.all(pending);
-      return valueParser.stringify(ast.nodes);
-    };
-
-    const declarations: Promise<void>[] = [];
-    parsed.walkDecls((declaration) => {
-      if (
-        SCRIPT_CSS_PATTERN.test(declaration.value) ||
-        FORBIDDEN_URL_PATTERN.test(declaration.value) ||
-        /^(?:behavior|-moz-binding)$/i.test(declaration.prop)
-      ) {
-        throw declaration.error("CSS 声明包含脚本或浏览器绑定");
-      }
-      declarations.push(
-        rewriteValue(declaration.value).then((value) => {
-          declaration.value = rewriteCssNames(value, globalNames);
-        })
-      );
+  async createFromDefaultTemplate(): Promise<ThemeStatus> {
+    const source = await this.defaultTemplateCss();
+    return this.#installSource({
+      source,
+      sourceRoot: path.dirname(this.#templatePath),
+      sourceFileName: "drawguess-theme-template.css",
+      applyMode: "replace",
+      enableAfterInstall: true
     });
-    await Promise.all(declarations);
+  }
 
-    parsed.walkRules((rule) => {
-      if (isKeyframes(rule)) {
-        return;
-      }
-      if (PROTECTED_SELECTOR_PATTERN.test(rule.selector)) {
-        throw rule.error("主题不能选择受保护的安全控件");
-      }
-      const rootSelectors = new Set<string>();
-      const selectors = rule.selectors.map((selector) => {
-        const trimmed = selector.trim();
-        selectorParser().processSync(trimmed);
-        if (trimmed === ":root") {
-          rootSelectors.add(THEME_ROOT_SELECTOR);
-          return THEME_ROOT_SELECTOR;
-        }
-        if (
-          trimmed.includes(THEME_ROOT_SELECTOR) ||
-          (/\[\s*data-ui\s*[*^$|~]?=/iu.test(trimmed) &&
-            /theme-root/iu.test(trimmed)) ||
-          trimmed.includes("&")
-        ) {
-          throw rule.error(
-            "主题选择器不能直接声明根作用域；请使用 :root 或根节点内的稳定 data-ui hook"
-          );
-        }
-        return `${THEME_ROOT_SELECTOR} ${trimmed}`;
-      });
-      rule.selectors = selectors;
-      if (rootSelectors.size > 0) {
-        rule.walkDecls((declaration) => {
-          if (
-            /^(?:position|z-index|isolation|transform|filter|opacity)$/i.test(
-              declaration.prop
-            )
-          ) {
-            throw declaration.error("主题根节点不能修改安全层所依赖的堆叠属性");
-          }
-        });
-      }
-    });
-
-    const validatedAssets = [...assets.values()];
-    const totalBytes = validatedAssets.reduce(
-      (total, asset) => total + asset.byteLength,
-      0
-    );
+  async defaultTemplateCss(): Promise<string> {
+    const css = await readFile(this.#templatePath, "utf8");
     if (
-      validatedAssets.length > CONTENT_LIMITS.themeAssetFiles ||
-      totalBytes > CONTENT_LIMITS.themeTotalAssetBytes
+      !css.includes(`Theme API Version: ${String(THEME_API_VERSION)}`) ||
+      !css.includes("Apply Mode: replace")
     ) {
-      throw new Error("主题素材数量或总大小超过限制");
+      throw new Error("内置默认模板版本头无效");
     }
-    const outputCss = parsed.toString();
-    const outputBytes = Buffer.from(outputCss, "utf8");
-    if (outputBytes.byteLength > CONTENT_LIMITS.themeCssBytes) {
-      throw new Error("重写后的 CSS 超过 512 KiB");
-    }
+    return css;
+  }
 
-    const staging = path.join(this.#themesRoot, `.staging-${randomUUID()}`);
-    const backup = path.join(this.#themesRoot, `.backup-${randomUUID()}`);
-    if (!isInside(this.#themesRoot, staging) || !isInside(this.#themesRoot, backup)) {
-      throw new Error("主题暂存目录无效");
+  async exportDefaultTemplate(targetPathInput: string): Promise<void> {
+    const targetPath = path.resolve(targetPathInput);
+    if (path.extname(targetPath).toLowerCase() !== ".css") {
+      throw new Error("默认模板必须导出为 .css 文件");
     }
-    await mkdir(path.join(staging, "assets"), { recursive: true });
-    const previousManifest = this.#manifest;
-    const previousSafeMode = this.#safeMode;
-    const previousError = this.#error;
-    const previousEnabled = this.#settings.settings.customCssEnabled;
-    let swapped = false;
-    let hadActive = false;
-    try {
-      await Promise.all(
-        validatedAssets.map((asset) =>
-          copyFile(asset.sourcePath, path.join(staging, "assets", asset.storedName))
-        )
-      );
-      const manifest = ThemeManifestSchema.parse({
-        schemaVersion: 1,
-        sourceFileName: path.basename(cssPath),
-        importedAt: new Date().toISOString(),
-        cssBytes: outputBytes.byteLength,
-        cssSha256: sha256(outputBytes),
-        assets: validatedAssets.map(
-          ({ original, storedName, byteLength, sha256: hash, mimeType }) => ({
-            original,
-            storedName,
-            byteLength,
-            sha256: hash,
-            mimeType
-          })
-        )
-      });
-      await Promise.all([
-        writeFile(path.join(staging, "style.css"), outputBytes, { mode: 0o600 }),
-        writeFile(
-          path.join(staging, "manifest.json"),
-          `${JSON.stringify(manifest, null, 2)}\n`,
-          { encoding: "utf8", mode: 0o600 }
-        )
-      ]);
+    const css = await this.defaultTemplateCss();
+    await writeFile(targetPath, css, { encoding: "utf8", mode: 0o600 });
+  }
 
-      hadActive = await this.#activeExists();
-      if (hadActive) {
-        await rename(this.#activeRoot, backup);
-      }
-      try {
-        await rename(staging, this.#activeRoot);
-        swapped = true;
-      } catch (error) {
-        if (hadActive) {
-          await rename(backup, this.#activeRoot).catch(() => undefined);
-        }
-        throw error;
-      }
-      await this.#settings.update({ customCssEnabled: true });
-      this.#manifest = manifest;
-      this.#error = null;
-      this.#safeMode = false;
-      await rm(backup, { recursive: true, force: true }).catch(() => undefined);
-      this.#logger.info("已导入本地自定义 CSS", {
-        fileName: manifest.sourceFileName,
-        assetCount: manifest.assets.length,
-        cssBytes: manifest.cssBytes
-      });
-      return this.status;
-    } catch (error) {
-      await rm(staging, { recursive: true, force: true }).catch(() => undefined);
-      if (swapped) {
-        await rm(this.#activeRoot, { recursive: true, force: true }).catch(
-          () => undefined
-        );
-        if (hadActive) {
-          await rename(backup, this.#activeRoot).catch(() => undefined);
-        }
-      }
-      this.#manifest = previousManifest;
-      this.#safeMode = previousSafeMode;
-      this.#error = previousError;
-      if (this.#settings.settings.customCssEnabled !== previousEnabled) {
-        await this.#settings
-          .update({ customCssEnabled: previousEnabled })
-          .catch(() => undefined);
-      }
-      throw error;
+  async reload(): Promise<ThemeStatus> {
+    if (!this.#manifest) {
+      throw new Error("当前没有可重新载入的主题");
     }
+    const sourcePath = path.join(this.#activeRoot, SOURCE_FILE);
+    const source = await readFile(sourcePath, "utf8");
+    return this.#installSource({
+      source,
+      sourceRoot: await realpath(this.#activeRoot),
+      sourceFileName: this.#manifest.sourceFileName,
+      applyMode: this.#manifest.applyMode,
+      enableAfterInstall: this.#settings.settings.customCssEnabled
+    });
   }
 
   async enable(): Promise<ThemeStatus> {
     if (!this.#manifest) {
       throw new Error("当前没有已导入的自定义 CSS");
     }
+    if (this.#manifest.themeApiVersion !== THEME_API_VERSION) {
+      throw new Error(
+        `主题接口版本不兼容：主题为 ${String(
+          this.#manifest.themeApiVersion
+        )}，应用支持 ${String(THEME_API_VERSION)}`
+      );
+    }
     this.#safeMode = false;
+    this.#error = null;
     await this.#settings.update({ customCssEnabled: true });
+    return this.status;
+  }
+
+  suspend(reason: string): ThemeStatus {
+    this.#safeMode = true;
+    this.#error = reason.trim() || "自定义 CSS 导致当前必要界面不可用";
+    this.#logger.warn("本地主题已自动进入安全模式", {
+      reason: this.#error
+    });
     return this.status;
   }
 
   async disable(): Promise<ThemeStatus> {
     this.#safeMode = false;
+    this.#error = null;
     await this.#settings.update({ customCssEnabled: false });
     return this.status;
   }
@@ -517,6 +336,10 @@ export class ThemeService {
     return this.status;
   }
 
+  get workDirectory(): string {
+    return this.#manifest ? this.#activeRoot : this.#themesRoot;
+  }
+
   registerProtocol(): Promise<void> {
     protocol.handle(THEME_PROTOCOL, (request) => this.responseForProtocol(request.url));
     return Promise.resolve();
@@ -529,15 +352,17 @@ export class ThemeService {
         return new Response("Not found", { status: 404 });
       }
       const match = /^\/assets\/([^/]+)$/u.exec(decodeURIComponent(url.pathname));
-      const storedName = match?.[1];
+      const compiledName = match?.[1];
       const asset = this.#manifest?.assets.find(
-        (candidate) => candidate.storedName === storedName
+        (candidate) =>
+          candidate.compiledPath === `${COMPILED_ASSET_DIRECTORY}/${compiledName ?? ""}`
       );
-      if (!storedName || !asset || path.basename(storedName) !== storedName) {
+      if (!compiledName || !asset || path.basename(compiledName) !== compiledName) {
         return new Response("Not found", { status: 404 });
       }
-      const target = path.resolve(this.#activeRoot, "assets", storedName);
-      if (!isInside(path.join(this.#activeRoot, "assets"), target)) {
+      const assetRoot = path.join(this.#activeRoot, COMPILED_ASSET_DIRECTORY);
+      const target = path.resolve(assetRoot, compiledName);
+      if (!isInside(assetRoot, target)) {
         return new Response("Forbidden", { status: 403 });
       }
       const bytes = await readFile(target);
@@ -558,65 +383,219 @@ export class ThemeService {
     }
   }
 
-  async #validateAsset(
-    sourceRoot: string,
-    rawReference: string
-  ): Promise<ValidatedAsset> {
-    let reference: string;
-    try {
-      reference = decodeURIComponent(rawReference.replaceAll("\\", "/"));
-    } catch {
-      throw new Error("CSS 素材 URL 编码无效");
+  async #installSource({
+    source,
+    sourceRoot,
+    sourceFileName,
+    applyMode,
+    enableAfterInstall
+  }: {
+    source: string;
+    sourceRoot: string;
+    sourceFileName: string;
+    applyMode: ThemeApplyMode;
+    enableAfterInstall: boolean;
+  }): Promise<ThemeStatus> {
+    const staging = path.join(this.#themesRoot, `.staging-${randomUUID()}`);
+    const backup = path.join(this.#themesRoot, `.backup-${randomUUID()}`);
+    if (!isInside(this.#themesRoot, staging) || !isInside(this.#themesRoot, backup)) {
+      throw new Error("主题暂存目录无效");
     }
+
+    const previousManifest = this.#manifest;
+    const previousSafeMode = this.#safeMode;
+    const previousEnabled = this.#settings.settings.customCssEnabled;
+    let hadActive = false;
+    let swapped = false;
+    try {
+      const themeApiVersion = themeApiVersionFromSource(source);
+      const compiled = await compileThemeCss(source, {
+        themeId: "active",
+        applyMode,
+        sourceRoot,
+        themeApiVersion
+      });
+      await this.#writeStaging(
+        staging,
+        source,
+        sourceFileName,
+        applyMode,
+        themeApiVersion,
+        compiled.css,
+        compiled.assets
+      );
+      const manifest = ThemeManifestSchema.parse(
+        JSON.parse(await readFile(path.join(staging, MANIFEST_FILE), "utf8")) as unknown
+      );
+      hadActive = await this.#activeExists();
+      if (hadActive) {
+        await rename(this.#activeRoot, backup);
+      }
+      try {
+        await rename(staging, this.#activeRoot);
+        swapped = true;
+      } catch (error) {
+        if (hadActive) {
+          await rename(backup, this.#activeRoot).catch(() => undefined);
+        }
+        throw error;
+      }
+      await this.#settings.update({ customCssEnabled: enableAfterInstall });
+      this.#manifest = manifest;
+      this.#safeMode = false;
+      this.#error = null;
+      await rm(backup, { recursive: true, force: true }).catch(() => undefined);
+      this.#logger.info("本地主题已原子编译并安装", {
+        applyMode,
+        assetCount: manifest.assets.length,
+        compiledBytes: manifest.compiledBytes,
+        themeApiVersion: manifest.themeApiVersion
+      });
+      return this.status;
+    } catch (error) {
+      await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+      if (swapped) {
+        await rm(this.#activeRoot, { recursive: true, force: true }).catch(
+          () => undefined
+        );
+        if (hadActive) {
+          await rename(backup, this.#activeRoot).catch(() => undefined);
+        }
+      }
+      this.#manifest = previousManifest;
+      this.#safeMode = previousSafeMode;
+      this.#error = `主题编译失败，已保留上一份可用主题：${errorMessage(error)}`;
+      if (this.#settings.settings.customCssEnabled !== previousEnabled) {
+        await this.#settings
+          .update({ customCssEnabled: previousEnabled })
+          .catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  async #writeStaging(
+    staging: string,
+    source: string,
+    sourceFileName: string,
+    applyMode: ThemeApplyMode,
+    themeApiVersion: number,
+    compiledCss: string,
+    assets: CompiledThemeAsset[]
+  ): Promise<void> {
+    await mkdir(path.join(staging, COMPILED_ASSET_DIRECTORY), { recursive: true });
+    for (const asset of assets) {
+      const sourceTarget = path.resolve(
+        staging,
+        ...normalizedAssetSegments(asset.sourceReference)
+      );
+      if (!isInside(staging, sourceTarget)) {
+        throw new Error("主题源素材复制目标越界");
+      }
+      await mkdir(path.dirname(sourceTarget), { recursive: true });
+      await copyFile(asset.sourcePath, sourceTarget);
+
+      const compiledTarget = path.join(
+        staging,
+        COMPILED_ASSET_DIRECTORY,
+        asset.compiledName
+      );
+      await copyFile(asset.sourcePath, compiledTarget);
+    }
+
+    const sourceBytes = Buffer.from(source, "utf8");
+    const compiledBytes = Buffer.from(compiledCss, "utf8");
+    const manifest = ThemeManifestSchema.parse({
+      schemaVersion: 2,
+      themeApiVersion,
+      applyMode,
+      sourceFile: SOURCE_FILE,
+      compiledFile: COMPILED_FILE,
+      sourceFileName,
+      sourceBytes: sourceBytes.byteLength,
+      compiledBytes: compiledBytes.byteLength,
+      sourceHash: sha256(sourceBytes),
+      compiledHash: sha256(compiledBytes),
+      updatedAt: new Date().toISOString(),
+      assets: assets.map((asset) => ({
+        sourcePath: asset.sourceReference,
+        compiledPath: `${COMPILED_ASSET_DIRECTORY}/${asset.compiledName}`,
+        byteLength: asset.byteLength,
+        sha256: asset.sha256,
+        mimeType: asset.mimeType
+      }))
+    });
+    await Promise.all([
+      writeFile(path.join(staging, SOURCE_FILE), sourceBytes, { mode: 0o600 }),
+      writeFile(path.join(staging, COMPILED_FILE), compiledBytes, { mode: 0o600 }),
+      writeFile(
+        path.join(staging, MANIFEST_FILE),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        { encoding: "utf8", mode: 0o600 }
+      )
+    ]);
+  }
+
+  async #validateActiveFiles(manifest: ThemeManifest): Promise<boolean> {
+    const [source, compiled] = await Promise.all([
+      readFile(path.join(this.#activeRoot, manifest.sourceFile)),
+      readFile(path.join(this.#activeRoot, manifest.compiledFile))
+    ]);
     if (
-      reference.startsWith("//") ||
-      reference.startsWith("/") ||
-      reference.includes("?") ||
-      reference.includes("#") ||
-      /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(reference) ||
-      path.win32.isAbsolute(reference)
+      compiled.byteLength !== manifest.compiledBytes ||
+      sha256(compiled) !== manifest.compiledHash
     ) {
-      throw new Error(`CSS 素材必须使用无查询参数的相对路径：${rawReference}`);
+      throw new Error("主题 compiled.css 与 manifest 校验不一致");
     }
-    const segments = reference.split("/").filter((segment) => segment !== ".");
-    if (segments.some((segment) => !segment || segment === "..")) {
-      throw new Error(`CSS 素材路径包含 traversal：${rawReference}`);
+    if (source.byteLength > CONTENT_LIMITS.themeCssBytes) {
+      throw new Error("主题 source.css 超过 512 KiB");
     }
-    const extension = path.extname(reference).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
-      throw new Error(`CSS 素材类型不在允许列表中：${extension || "未知"}`);
+    return (
+      source.byteLength !== manifest.sourceBytes ||
+      sha256(source) !== manifest.sourceHash
+    );
+  }
+
+  async #migrateLegacy(legacy: z.infer<typeof LegacyThemeManifestSchema>) {
+    const legacyCssPath = path.join(this.#activeRoot, "style.css");
+    const bytes = await readFile(legacyCssPath);
+    if (bytes.byteLength !== legacy.cssBytes || sha256(bytes) !== legacy.cssSha256) {
+      throw new Error("旧主题 CSS 与 manifest 校验不一致");
     }
-    const candidate = path.resolve(sourceRoot, ...segments);
-    if (!isInside(sourceRoot, candidate)) {
-      throw new Error("CSS 素材路径超出 CSS 根目录");
-    }
-    let resolved: string;
-    try {
-      resolved = await realpath(candidate);
-    } catch {
-      throw new Error(`CSS 引用的素材不存在：${rawReference}`);
-    }
-    if (!isInside(sourceRoot, resolved)) {
-      throw new Error("CSS 素材符号链接逃逸了 CSS 根目录");
-    }
-    const info = await stat(resolved);
-    if (!info.isFile() || info.size < 1 || info.size > CONTENT_LIMITS.themeAssetBytes) {
-      throw new Error("CSS 单个素材必须在 1 字节到 5 MiB 之间");
-    }
-    const bytes = await readFile(resolved);
-    const hash = sha256(bytes);
-    const mimeType = MIME_TYPES[extension];
-    if (!mimeType) {
-      throw new Error("CSS 素材 MIME 无法确定");
-    }
-    return {
-      original: reference,
-      sourcePath: resolved,
-      storedName: `${hash.slice(0, 16)}-${safeAssetBasename(reference)}`,
-      byteLength: bytes.byteLength,
-      sha256: hash,
-      mimeType: mimeType as ValidatedAsset["mimeType"]
-    };
+    const manifest = ThemeManifestSchema.parse({
+      schemaVersion: 2,
+      themeApiVersion: THEME_API_VERSION,
+      applyMode: "override",
+      sourceFile: SOURCE_FILE,
+      compiledFile: COMPILED_FILE,
+      sourceFileName: legacy.sourceFileName,
+      sourceBytes: bytes.byteLength,
+      compiledBytes: bytes.byteLength,
+      sourceHash: legacy.cssSha256,
+      compiledHash: legacy.cssSha256,
+      updatedAt: legacy.importedAt,
+      assets: legacy.assets.map((asset) => ({
+        sourcePath: asset.original,
+        compiledPath: `${COMPILED_ASSET_DIRECTORY}/${asset.storedName}`,
+        byteLength: asset.byteLength,
+        sha256: asset.sha256,
+        mimeType: asset.mimeType
+      }))
+    });
+    await Promise.all([
+      writeFile(path.join(this.#activeRoot, SOURCE_FILE), bytes, { mode: 0o600 }),
+      writeFile(path.join(this.#activeRoot, COMPILED_FILE), bytes, { mode: 0o600 }),
+      writeFile(
+        path.join(this.#activeRoot, MANIFEST_FILE),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        { encoding: "utf8", mode: 0o600 }
+      )
+    ]);
+    this.#logger.info("已将旧版主题清单迁移到 schema 2", {
+      applyMode: "override",
+      themeApiVersion: THEME_API_VERSION
+    });
+    return manifest;
   }
 
   async #activeExists(): Promise<boolean> {
