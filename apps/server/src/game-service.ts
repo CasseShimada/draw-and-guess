@@ -64,7 +64,7 @@ type RoomRemovalReason =
 const ROOM_REMOVAL_MESSAGES: Record<RoomRemovalReason, string> = {
   "host-closed": "房主已关闭房间",
   "idle-timeout": "房间长时间无人连接，已自动关闭",
-  "server-shutdown": "房间服务已停止",
+  "server-shutdown": "房主已退出，房间服务已停止",
   "room-removed": "房间已关闭"
 };
 

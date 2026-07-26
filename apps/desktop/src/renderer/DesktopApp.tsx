@@ -33,7 +33,6 @@ import {
   visibleDesktopPanel,
   type DesktopPanel
 } from "./DesktopDock.js";
-import { HostConnectionInformation } from "./HostConnectionInformation.js";
 import { desktopContentServices } from "./desktop-content-store.js";
 
 const EMPTY_CAPTURE: CaptureSummary = {
@@ -265,7 +264,7 @@ function ConnectionPanel({
   return (
     <section
       aria-hidden={!open}
-      className={`desktop-panel ${open ? "desktop-panel--open" : ""}`}
+      className={`desktop-panel connection-panel ${open ? "desktop-panel--open" : ""}`}
       data-ui="protected-safety"
     >
       <header className="desktop-panel__heading">
@@ -278,7 +277,7 @@ function ConnectionPanel({
         </button>
       </header>
       <div className="desktop-panel__content connection-grid">
-        <section className="control-card">
+        <section className="control-card connection-card connection-card--local">
           <span className={`service-state service-state--${status.state}`}>
             {serverStateLabel(status)}
           </span>
@@ -431,8 +430,11 @@ function ConnectionPanel({
           )}
         </section>
 
-        <form className="control-card" onSubmit={savePublicEndpoint}>
-          <span className="service-state">PORT FORWARD</span>
+        <form
+          className="control-card connection-card connection-card--public"
+          onSubmit={savePublicEndpoint}
+        >
+          <span className="service-state">可选 · 端口转发</span>
           <h3>公网分享信息（可选）</h3>
           <p>
             SakuraFrp 或其它隧道把一个公网入口转发到本机同一个游戏端口。
@@ -513,7 +515,7 @@ function ConnectionPanel({
         </form>
         {roomCode && (
           <form
-            className="control-card room-password-card"
+            className="control-card connection-card room-password-card"
             data-ui="actual-host-room-password"
             onSubmit={changeRoomPassword}
           >
@@ -1498,35 +1500,24 @@ export function DesktopApp() {
           key={`${normalizeConnectionTarget(settings.currentClientTarget).origin}:${String(
             gameViewEpoch
           )}`}
-          lobbyAddon={
-            <>
-              {captureCard}
-              {hostControls && snapshot && (
-                <HostConnectionInformation
-                  onSettings={updateSettings}
-                  roomCode={snapshot.roomCode}
-                  settings={settings}
-                  status={serverStatus}
-                />
-              )}
-            </>
-          }
+          lobbyAddon={<>{captureCard}</>}
           notificationsEnabled={settings.notificationsEnabled}
           onSnapshot={setSnapshot}
+          topbarAddon={
+            <DesktopDock
+              activePanel={visiblePanel}
+              captureActive={capture.active}
+              captureReady={capture.ready}
+              connectionManagementAvailable={connectionManagementAvailable}
+              onToggle={(nextPanel) =>
+                setPanel((current) => (current === nextPanel ? null : nextPanel))
+              }
+              serverState={serverStatus.state}
+            />
+          }
           transport={transport}
         />
       </div>
-
-      <DesktopDock
-        activePanel={visiblePanel}
-        captureActive={capture.active}
-        captureReady={capture.ready}
-        connectionManagementAvailable={connectionManagementAvailable}
-        onToggle={(nextPanel) =>
-          setPanel((current) => (current === nextPanel ? null : nextPanel))
-        }
-        serverState={serverStatus.state}
-      />
 
       {visiblePanel && visiblePanel !== "capture" && (
         <button

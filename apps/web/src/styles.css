@@ -1065,6 +1065,47 @@ input {
   text-align: left;
 }
 
+.room-closure-backdrop {
+  position: fixed;
+  z-index: 240;
+  inset: 0;
+  display: grid;
+  padding: 1.5rem;
+  place-items: center;
+  background: rgba(34, 33, 31, 0.68);
+  backdrop-filter: blur(5px);
+}
+
+.room-closure-dialog {
+  display: grid;
+  width: min(32rem, 100%);
+  padding: 1.6rem;
+  border: 3px solid var(--line);
+  background: var(--paper-light);
+  box-shadow: 8px 8px 0 var(--coral-dark);
+  gap: 1rem;
+}
+
+.room-closure-dialog h2,
+.room-closure-dialog p {
+  margin: 0;
+}
+
+.room-closure-dialog h2 {
+  font-size: 1.75rem;
+}
+
+.room-closure-dialog > p:not(.eyebrow) {
+  color: #514c45;
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.room-closure-dialog .primary-button {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
 .loading-screen {
   display: grid;
   min-height: 100vh;

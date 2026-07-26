@@ -30,6 +30,8 @@ describe("desktop dock access", () => {
       })
     );
 
+    expect(html).toContain('class="desktop-toolbar"');
+    expect(html).toContain('aria-label="桌面应用工具"');
     expect(html).not.toContain('data-ui="connection-management"');
     expect(html).not.toContain(">联机</button>");
     expect(html).toContain(">采集</button>");

@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  ROOM_REMOVED_CLOSE_CODE,
   decodeViewerFrame,
   encodeUploadFrame,
   type ClientJsonMessage,
@@ -353,5 +354,77 @@ describe("real HTTP + WebSocket protocol-v4 integration", () => {
       protocol: String(PROTOCOL_VERSION),
       body: expect.stringContaining("Please upgrade")
     });
+  });
+
+  it("delivers a terminal room reason before application shutdown closes sockets", async () => {
+    const { app } = await createApp({
+      config: testConfig(),
+      serveStatic: false,
+      startCleanup: false
+    });
+    activeApp = app;
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("测试服务器地址无效");
+    }
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/desktop/rooms",
+      headers: {
+        "x-draw-guess-client": "desktop",
+        "x-draw-guess-protocol": String(PROTOCOL_VERSION)
+      },
+      payload: { nickname: "即将退出的房主", password: "secret" }
+    });
+    const createdBody = created.json<{
+      sessionToken: string;
+      snapshot: { roomCode: string };
+    }>();
+    const joined = await app.inject({
+      method: "POST",
+      url: `/api/desktop/rooms/${createdBody.snapshot.roomCode}/join`,
+      headers: {
+        "x-draw-guess-client": "desktop",
+        "x-draw-guess-protocol": String(PROTOCOL_VERSION)
+      },
+      payload: {
+        roomCode: createdBody.snapshot.roomCode,
+        nickname: "等待通知的玩家",
+        password: "secret"
+      }
+    });
+    const joinedBody = joined.json<{ sessionToken: string }>();
+    const guest = await openSocket(
+      `ws://127.0.0.1:${String(
+        address.port
+      )}/ws?protocolVersion=${String(PROTOCOL_VERSION)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${joinedBody.sessionToken}`,
+          "X-Draw-Guess-Client": "desktop",
+          "X-Draw-Guess-Protocol": String(PROTOCOL_VERSION)
+        }
+      }
+    );
+    sockets.push(guest.socket);
+    await guest.waitForJson("room:snapshot");
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      guest.socket.once("close", (code, reason) =>
+        resolve({ code, reason: reason.toString("utf8") })
+      );
+    });
+
+    const closing = app.close();
+    expect(await guest.waitForJson("error")).toMatchObject({
+      code: "NOT_FOUND",
+      message: "房主已退出，房间服务已停止"
+    });
+    await expect(closed).resolves.toEqual({
+      code: ROOM_REMOVED_CLOSE_CODE,
+      reason: "房主已退出，房间服务已停止"
+    });
+    await closing;
+    activeApp = null;
   });
 });

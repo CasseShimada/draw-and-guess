@@ -614,10 +614,10 @@ export async function createApp(options: CreateAppOptions = {}): Promise<{
     return reply.send(Buffer.from(avatar.bytes));
   });
 
-  attachWebSocketServer(app, service, config);
-  app.addHook("onClose", async () => {
+  app.addHook("preClose", async () => {
     await service.shutdown();
   });
+  attachWebSocketServer(app, service, config);
 
   let cleanupTimer: NodeJS.Timeout | null = null;
   if (options.startCleanup !== false) {

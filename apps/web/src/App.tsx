@@ -32,6 +32,7 @@ import type {
 
 import { AvatarEditor } from "./AvatarEditor.js";
 import { RoomCodeCopyButton } from "./RoomCodeCopyButton.js";
+import { RoomClosureDialog } from "./RoomClosureDialog.js";
 import { WordPackManager } from "./WordPackManager.js";
 import { createBrowserContentServices } from "./content-store.js";
 import { GAME_MODE_LABELS, ModeRenderer } from "./modes/registry.js";
@@ -198,6 +199,7 @@ function Home({
   error,
   initialEntryMode,
   joinConnectionControl,
+  topbarAddon,
   avatarControl,
   onCreate,
   onJoin,
@@ -207,6 +209,7 @@ function Home({
   error: string | null;
   initialEntryMode: "create" | "join";
   joinConnectionControl?: ReactNode;
+  topbarAddon?: ReactNode;
   avatarControl: ReactNode;
   onCreate: (nickname: string, password: string) => Promise<void>;
   onJoin: (roomCode: string, nickname: string, password: string) => Promise<void>;
@@ -268,6 +271,7 @@ function Home({
 
       <section className="entry-card" data-ui="room-entry">
         <div className="home-content-actions">
+          {topbarAddon}
           <button onClick={onManageWords} type="button">
             词库管理
           </button>
@@ -478,6 +482,7 @@ export function App({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [roomClosureNotice, setRoomClosureNotice] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("offline");
   const [wordOptions, setWordOptions] = useState<WordOption[]>([]);
   const [wordOptionsActorStepId, setWordOptionsActorStepId] = useState<string | null>(
@@ -580,26 +585,32 @@ export function App({
     setFrameUrl(null);
   }, []);
 
-  const leaveClosedRoom = useCallback(
-    (message: string) => {
-      clearFrame();
-      snapshotRef.current = null;
-      frameContextRef.current = "";
-      avatarSyncKeyRef.current = "";
-      setSnapshot(null);
-      setConnection("offline");
-      setWordOptions([]);
-      setWordOptionsActorStepId(null);
-      setCurrentWord(null);
-      setSavedReplayAvailable(false);
-      onSnapshot?.(null);
-      reportEntryError(message || "房间已关闭，请重新创建或加入房间");
-    },
-    [clearFrame, onSnapshot, reportEntryError]
-  );
+  const announceClosedRoom = useCallback((message: string) => {
+    setConnection("offline");
+    setWordManagerOpen(false);
+    setRoomClosureNotice(message.trim() || "房间已关闭，请确认后返回主界面");
+  }, []);
+
+  const confirmClosedRoom = useCallback(() => {
+    const message = roomClosureNotice ?? "房间已关闭";
+    clearFrame();
+    snapshotRef.current = null;
+    frameContextRef.current = "";
+    avatarSyncKeyRef.current = "";
+    setRoomClosureNotice(null);
+    setSnapshot(null);
+    setConnection("offline");
+    setWordOptions([]);
+    setWordOptionsActorStepId(null);
+    setCurrentWord(null);
+    setSavedReplayAvailable(false);
+    onSnapshot?.(null);
+    reportEntryError(`${message}。你已返回主界面。`);
+  }, [clearFrame, onSnapshot, reportEntryError, roomClosureNotice]);
 
   const applySnapshot = useCallback(
     (next: PublicRoomSnapshot) => {
+      setRoomClosureNotice(null);
       const nextContext = drawingContext(next);
       if (frameContextRef.current !== nextContext || !acceptsLiveFrame(next)) {
         clearFrame();
@@ -908,7 +919,7 @@ export function App({
           return;
         }
         if (event.code === ROOM_REMOVED_CLOSE_CODE) {
-          leaveClosedRoom(event.reason);
+          announceClosedRoom(event.reason);
           return;
         }
         setConnection("reconnecting");
@@ -945,7 +956,7 @@ export function App({
   }, [
     applyFrame,
     handleServerMessage,
-    leaveClosedRoom,
+    announceClosedRoom,
     notify,
     snapshot?.roomCode,
     transport
@@ -959,7 +970,7 @@ export function App({
       if (event.kind === "connection") {
         setConnection(event.state);
         if (event.state === "offline" && event.error) {
-          leaveClosedRoom(event.error);
+          announceClosedRoom(event.error);
         } else if (event.error) {
           notify(event.error);
         }
@@ -976,7 +987,7 @@ export function App({
         }
       }
     });
-  }, [applyFrame, handleServerMessage, leaveClosedRoom, notify, send, transport]);
+  }, [announceClosedRoom, applyFrame, handleServerMessage, notify, send, transport]);
 
   useEffect(() => {
     const replay = hostControls?.replay;
@@ -1476,6 +1487,7 @@ export function App({
         error={error}
         initialEntryMode={initialEntryMode}
         joinConnectionControl={joinConnectionControl}
+        topbarAddon={topbarAddon}
         onCreate={createRoom}
         onJoin={joinRoom}
         onManageWords={() => setWordManagerOpen(true)}
@@ -1714,9 +1726,17 @@ export function App({
       )}
 
       {error && (
-        <button className="toast" onClick={() => setError(null)} type="button">
+        <button
+          className="toast"
+          data-ui="game-toast"
+          onClick={() => setError(null)}
+          type="button"
+        >
           {error}
         </button>
+      )}
+      {roomClosureNotice && (
+        <RoomClosureDialog message={roomClosureNotice} onConfirm={confirmClosedRoom} />
       )}
     </div>
   );

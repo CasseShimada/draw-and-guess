@@ -32,7 +32,11 @@ export function DesktopDock({
   serverState: EmbeddedServerStatus["state"];
 }) {
   return (
-    <nav aria-label="桌面应用控制" className="desktop-dock" data-ui="protected-safety">
+    <nav
+      aria-label="桌面应用工具"
+      className="desktop-toolbar"
+      data-ui="protected-safety"
+    >
       {connectionManagementAvailable && (
         <button
           className={activePanel === "connection" ? "active" : ""}

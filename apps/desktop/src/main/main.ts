@@ -147,10 +147,8 @@ async function runSmokeCheck(
         const bindMode = labels.find((label) =>
           label.textContent?.includes("绑定模式")
         );
-        const dock = document.querySelector(".desktop-dock");
-        const themeRoot = document.querySelector('[data-ui="theme-root"]');
-        const dockBounds = dock?.getBoundingClientRect();
-        const themeBounds = themeRoot?.getBoundingClientRect();
+        const toolbar = document.querySelector(".desktop-toolbar");
+        const toolbarBounds = toolbar?.getBoundingClientRect();
         resolve({
           addressIsText:
             addressLabel?.querySelector("input")?.getAttribute("type") === "text",
@@ -159,18 +157,81 @@ async function runSmokeCheck(
           hasBindModes:
             bindMode?.textContent?.includes("仅本机") === true &&
             bindMode?.textContent?.includes("局域网 / 可做端口转发") === true,
-          dockSeparatedFromGame:
-            Boolean(dockBounds && themeBounds) &&
-            themeBounds.bottom <= dockBounds.top + 0.5,
-          dockInsideViewport:
-            Boolean(dockBounds) &&
-            dockBounds.bottom <= window.innerHeight &&
-            dockBounds.left >= 0,
+          toolbarIntegratedWithHomeActions:
+            Boolean(toolbar) && Boolean(toolbar?.closest(".home-content-actions")),
+          toolbarAtTop:
+            Boolean(toolbarBounds) &&
+            toolbarBounds.top >= 0 &&
+            toolbarBounds.bottom < window.innerHeight / 2,
+          toolbarInsideViewport:
+            Boolean(toolbarBounds) &&
+            toolbarBounds.right <= window.innerWidth &&
+            toolbarBounds.left >= 0,
           noExternalInviteBridge:
             typeof window.drawGuessDesktop.app.onInvite === "undefined"
         });
       }));
     })`,
+    true
+  )) as Record<string, unknown>;
+  const captureUi = (await window.webContents.executeJavaScript(
+    `(async () => {
+      const captureButton = [...document.querySelectorAll(".desktop-toolbar button")]
+        .find((button) => button.textContent?.trim() === "采集");
+      captureButton?.click();
+      const panel = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const candidate = document.querySelector(
+            ".capture-studio.desktop-panel--open"
+          );
+          if (candidate || Date.now() >= deadline) {
+            resolve(candidate);
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
+      const toolbar = panel?.querySelector(".crop-toolbar");
+      const sample = document.createElement("button");
+      sample.textContent = "对比度检查";
+      toolbar?.append(sample);
+      const parseRgb = (value) =>
+        (value.match(/[\\d.]+/g) ?? []).slice(0, 3).map(Number);
+      const luminance = (value) => {
+        const channels = parseRgb(value).map((channel) => {
+          const normalized = channel / 255;
+          return normalized <= 0.04045
+            ? normalized / 12.92
+            : ((normalized + 0.055) / 1.055) ** 2.4;
+        });
+        return (
+          (channels[0] ?? 0) * 0.2126 +
+          (channels[1] ?? 0) * 0.7152 +
+          (channels[2] ?? 0) * 0.0722
+        );
+      };
+      const contrast = (element) => {
+        const style = getComputedStyle(element);
+        const foreground = luminance(style.color);
+        const background = luminance(style.backgroundColor);
+        return (Math.max(foreground, background) + 0.05) /
+          (Math.min(foreground, background) + 0.05);
+      };
+      const enabledContrast = toolbar ? contrast(sample) : 0;
+      sample.disabled = true;
+      const disabledContrast = toolbar ? contrast(sample) : 0;
+      sample.remove();
+      panel?.querySelector('button[aria-label="关闭采集工作室"]')?.click();
+      return {
+        panelOpened: Boolean(panel),
+        enabledContrast,
+        disabledContrast,
+        enabledReadable: enabledContrast >= 4.5,
+        disabledReadable: disabledContrast >= 4.5
+      };
+    })()`,
     true
   )) as Record<string, unknown>;
   const themeSource = path.join(app.getPath("userData"), "smoke-theme-source");
@@ -227,19 +288,29 @@ async function runSmokeCheck(
           const copyButton = document.querySelector('[data-ui="room-code-copy"]');
           const displayedCode = copyButton?.querySelector("code")?.textContent?.trim();
           const compactInTopbar = Boolean(copyButton?.closest('[data-ui="topbar"]'));
+          const desktopToolbar = document.querySelector(".desktop-toolbar");
+          const toolbarIntegratedInTopbar = Boolean(
+            desktopToolbar?.closest('[data-ui="topbar"]')
+          );
           const largeInviteBannerAbsent =
             document.querySelector(".host-room-code-banner") === null;
+          const lobbyConnectionModuleAbsent =
+            document.querySelector('[data-ui="host-network-info"]') === null;
           if (
             displayedCode === response.snapshot.roomCode &&
             compactInTopbar &&
-            largeInviteBannerAbsent
+            toolbarIntegratedInTopbar &&
+            largeInviteBannerAbsent &&
+            lobbyConnectionModuleAbsent
           ) {
             resolve({
               visible: true,
               displayedCode,
               hasCopyButton: copyButton?.tagName === "BUTTON",
               compactInTopbar,
-              largeInviteBannerAbsent
+              toolbarIntegratedInTopbar,
+              largeInviteBannerAbsent,
+              lobbyConnectionModuleAbsent
             });
             return;
           }
@@ -249,8 +320,39 @@ async function runSmokeCheck(
               displayedCode: displayedCode ?? null,
               hasCopyButton: copyButton?.tagName === "BUTTON",
               compactInTopbar,
-              largeInviteBannerAbsent
+              toolbarIntegratedInTopbar,
+              largeInviteBannerAbsent,
+              lobbyConnectionModuleAbsent
             });
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
+      const toastUi = await new Promise((resolve) => {
+        const startButton = [...document.querySelectorAll("button")].find(
+          (button) => button.textContent?.trim() === "开始经典画猜"
+        );
+        startButton?.click();
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const toast = document.querySelector('[data-ui="game-toast"]');
+          const toolbar = document.querySelector(".desktop-toolbar");
+          const toastBounds = toast?.getBoundingClientRect();
+          const toolbarBounds = toolbar?.getBoundingClientRect();
+          if ((toast && toolbar) || Date.now() >= deadline) {
+            const separated =
+              Boolean(toastBounds && toolbarBounds) &&
+              (toastBounds.bottom <= toolbarBounds.top ||
+                toolbarBounds.bottom <= toastBounds.top);
+            resolve({
+              visible: Boolean(toast),
+              explainsMinimumPlayers:
+                toast?.textContent?.includes("至少") === true,
+              separatedFromToolbar: separated
+            });
+            toast?.click();
             return;
           }
           setTimeout(inspect, 50);
@@ -268,7 +370,8 @@ async function runSmokeCheck(
         server: response.server,
         persistedTarget: refreshed.settings.currentClientTarget,
         defaultMinimizeToTray: refreshed.settings.minimizeToTray,
-        roomCodeUi
+        roomCodeUi,
+        toastUi
       };
     })()`,
     true
@@ -288,9 +391,88 @@ async function runSmokeCheck(
       displayedCode?: unknown;
       hasCopyButton?: unknown;
       compactInTopbar?: unknown;
+      toolbarIntegratedInTopbar?: unknown;
       largeInviteBannerAbsent?: unknown;
+      lobbyConnectionModuleAbsent?: unknown;
+    };
+    toastUi: {
+      visible?: unknown;
+      explainsMinimumPlayers?: unknown;
+      separatedFromToolbar?: unknown;
     };
   };
+  windowManager.sendGameEvent({
+    kind: "connection",
+    state: "offline",
+    error: "房主已退出，房间服务已停止"
+  });
+  const roomClosureConfirmationUi = (await window.webContents.executeJavaScript(
+    `new Promise((resolve) => {
+      const deadline = Date.now() + 5_000;
+      const inspectDialog = () => {
+        const dialog = document.querySelector('[data-ui="room-closure-dialog"]');
+        const confirmButton = dialog?.querySelector(
+          '[data-ui="confirm-room-closure"]'
+        );
+        if (dialog && confirmButton) {
+          const roomCodeBeforeConfirmation = document
+            .querySelector('[data-ui="room-code-copy"] code')
+            ?.textContent?.trim();
+          const homeBeforeConfirmation = Boolean(
+            document.querySelector('[data-ui="home"]')
+          );
+          confirmButton.click();
+          const inspectHome = () => {
+            const homeAfterConfirmation = Boolean(
+              document.querySelector('[data-ui="home"]')
+            );
+            const roomCodeHiddenAfterConfirmation =
+              document.querySelector('[data-ui="room-code-copy"]') === null;
+            if (
+              (homeAfterConfirmation && roomCodeHiddenAfterConfirmation) ||
+              Date.now() >= deadline
+            ) {
+              resolve({
+                dialogVisible: true,
+                reasonVisible:
+                  dialog.textContent?.includes(
+                    "房主已退出，房间服务已停止"
+                  ) === true,
+                confirmationActionVisible: true,
+                heldRoomUntilConfirmation:
+                  roomCodeBeforeConfirmation ===
+                    ${JSON.stringify(autoLocalCreate.roomCode)} &&
+                  !homeBeforeConfirmation,
+                homeAfterConfirmation,
+                roomCodeHiddenAfterConfirmation
+              });
+              return;
+            }
+            setTimeout(inspectHome, 50);
+          };
+          setTimeout(inspectHome, 0);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve({
+            dialogVisible: false,
+            reasonVisible: false,
+            confirmationActionVisible: Boolean(confirmButton),
+            heldRoomUntilConfirmation: false,
+            homeAfterConfirmation: Boolean(
+              document.querySelector('[data-ui="home"]')
+            ),
+            roomCodeHiddenAfterConfirmation:
+              document.querySelector('[data-ui="room-code-copy"]') === null
+          });
+          return;
+        }
+        setTimeout(inspectDialog, 50);
+      };
+      inspectDialog();
+    })`,
+    true
+  )) as Record<string, unknown>;
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("刷新桌面界面以恢复房主状态超时"));
@@ -327,6 +509,39 @@ async function runSmokeCheck(
         inspect();
       });
       connectionButton?.click();
+      const connectionPanelUi = await new Promise((resolve) => {
+        const deadline = Date.now() + 5_000;
+        const inspect = () => {
+          const panel = document.querySelector(
+            ".connection-panel.desktop-panel--open"
+          );
+          if (panel || Date.now() >= deadline) {
+            const bounds = panel?.getBoundingClientRect();
+            const grid = panel?.querySelector(".connection-grid");
+            const description = panel?.querySelector(".connection-card > p");
+            const input = panel?.querySelector(".connection-card input");
+            const columnTracks = grid
+              ? getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean)
+              : [];
+            resolve({
+              visible: Boolean(panel),
+              wideLayout: Boolean(bounds) && bounds.width >= 950,
+              twoReadableColumns: columnTracks.length === 2,
+              descriptionFontSize: description
+                ? Number.parseFloat(getComputedStyle(description).fontSize)
+                : 0,
+              inputFontSize: input
+                ? Number.parseFloat(getComputedStyle(input).fontSize)
+                : 0,
+              noBottomFloatingToolbar:
+                document.querySelector(".desktop-root > .desktop-toolbar") === null
+            });
+            return;
+          }
+          setTimeout(inspect, 50);
+        };
+        inspect();
+      });
       const passwordControlUi = await new Promise((resolve) => {
         const deadline = Date.now() + 5_000;
         const inspect = () => {
@@ -384,7 +599,7 @@ async function runSmokeCheck(
           .reverse()
           .find((entry) => entry.message.startsWith("加入房间失败"))?.message ??
         null;
-      [...document.querySelectorAll(".desktop-dock button")]
+      [...document.querySelectorAll(".desktop-toolbar button")]
         .find((button) => button.textContent?.trim() === "诊断")
         ?.click();
       const joinFailureDiagnosticUi = await new Promise((resolve) => {
@@ -413,6 +628,7 @@ async function runSmokeCheck(
         inspect();
       });
       return {
+        connectionPanelUi,
         passwordControlUi,
         rejectedJoinMessage,
         joinFailureDiagnostic,
@@ -421,6 +637,14 @@ async function runSmokeCheck(
     })()`,
     true
   )) as {
+    connectionPanelUi: {
+      visible?: unknown;
+      wideLayout?: unknown;
+      twoReadableColumns?: unknown;
+      descriptionFontSize?: unknown;
+      inputFontSize?: unknown;
+      noBottomFloatingToolbar?: unknown;
+    };
     passwordControlUi: {
       visible?: unknown;
       hasTwoPasswordInputs?: unknown;
@@ -572,9 +796,13 @@ async function runSmokeCheck(
           networkUi.hasPort === true &&
           networkUi.hasSecurity === true &&
           networkUi.hasBindModes === true &&
-          networkUi.dockSeparatedFromGame === true &&
-          networkUi.dockInsideViewport === true &&
+          networkUi.toolbarIntegratedWithHomeActions === true &&
+          networkUi.toolbarAtTop === true &&
+          networkUi.toolbarInsideViewport === true &&
           networkUi.noExternalInviteBridge === true &&
+          captureUi.panelOpened === true &&
+          captureUi.enabledReadable === true &&
+          captureUi.disabledReadable === true &&
           themeRuntime.assetLoaded &&
           themeRuntime.marker === "packaged-theme-ready" &&
           typeof autoLocalCreate.roomCode === "string" &&
@@ -588,10 +816,29 @@ async function runSmokeCheck(
           autoLocalCreate.roomCodeUi.displayedCode === autoLocalCreate.roomCode &&
           autoLocalCreate.roomCodeUi.hasCopyButton === true &&
           autoLocalCreate.roomCodeUi.compactInTopbar === true &&
+          autoLocalCreate.roomCodeUi.toolbarIntegratedInTopbar === true &&
           autoLocalCreate.roomCodeUi.largeInviteBannerAbsent === true &&
+          autoLocalCreate.roomCodeUi.lobbyConnectionModuleAbsent === true &&
+          autoLocalCreate.toastUi.visible === true &&
+          autoLocalCreate.toastUi.explainsMinimumPlayers === true &&
+          autoLocalCreate.toastUi.separatedFromToolbar === true &&
+          roomClosureConfirmationUi.dialogVisible === true &&
+          roomClosureConfirmationUi.reasonVisible === true &&
+          roomClosureConfirmationUi.confirmationActionVisible === true &&
+          roomClosureConfirmationUi.heldRoomUntilConfirmation === true &&
+          roomClosureConfirmationUi.homeAfterConfirmation === true &&
+          roomClosureConfirmationUi.roomCodeHiddenAfterConfirmation === true &&
           autoLocalCreate.defaultMinimizeToTray === false &&
           typeof autoLocalCreate.selfNickname === "string" &&
           /#\d{4}$/u.test(autoLocalCreate.selfNickname) &&
+          hostRoomRuntime.connectionPanelUi.visible === true &&
+          hostRoomRuntime.connectionPanelUi.wideLayout === true &&
+          hostRoomRuntime.connectionPanelUi.twoReadableColumns === true &&
+          typeof hostRoomRuntime.connectionPanelUi.descriptionFontSize === "number" &&
+          hostRoomRuntime.connectionPanelUi.descriptionFontSize >= 13 &&
+          typeof hostRoomRuntime.connectionPanelUi.inputFontSize === "number" &&
+          hostRoomRuntime.connectionPanelUi.inputFontSize >= 14 &&
+          hostRoomRuntime.connectionPanelUi.noBottomFloatingToolbar === true &&
           hostRoomRuntime.passwordControlUi.visible === true &&
           hostRoomRuntime.passwordControlUi.hasTwoPasswordInputs === true &&
           hostRoomRuntime.passwordControlUi.hasCloseRoomAction === true &&
@@ -622,7 +869,9 @@ async function runSmokeCheck(
         connectionInfo,
         embedded,
         networkUi,
+        captureUi,
         autoLocalCreate,
+        roomClosureConfirmationUi,
         hostRoomRuntime,
         rotatedPassword,
         closedRoom,

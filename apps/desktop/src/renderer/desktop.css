@@ -9,52 +9,61 @@ body:has(.sharing-overlay) {
 }
 
 .desktop-root {
-  display: grid;
   height: 100vh;
   min-height: 0;
   overflow: hidden;
-  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .theme-root {
   position: relative;
   z-index: 0;
+  height: 100vh;
   min-height: 0;
   overflow-y: auto;
   isolation: isolate;
 }
 
-.desktop-dock {
-  position: relative;
-  z-index: 90;
-  display: flex;
-  margin: 0.5rem 1rem 1rem;
-  padding: 0.35rem;
-  justify-self: end;
-  border: 2px solid var(--line);
-  background: rgba(255, 250, 240, 0.96);
-  box-shadow: 4px 4px 0 var(--line);
-  backdrop-filter: blur(12px);
-  gap: 0.2rem;
+.desktop-toolbar {
+  display: inline-flex;
+  padding-left: 0.7rem;
+  align-items: center;
+  border-left: 2px solid var(--line);
+  gap: 0.12rem;
 }
 
-.desktop-dock button {
+.desktop-toolbar button {
   display: inline-flex;
-  min-width: 4rem;
-  padding: 0.65rem 0.7rem;
+  min-width: 3.5rem;
+  min-height: 2.35rem;
+  padding: 0.5rem 0.62rem;
   align-items: center;
   justify-content: center;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
+  color: var(--ink);
   cursor: pointer;
   font-size: 0.72rem;
   font-weight: 900;
   gap: 0.4rem;
 }
 
-.desktop-dock button:hover,
-.desktop-dock button.active {
+.desktop-toolbar button:hover,
+.desktop-toolbar button:focus-visible,
+.desktop-toolbar button.active {
+  border-color: var(--line);
   background: var(--yellow);
+}
+
+.home-content-actions {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.home-content-actions .desktop-toolbar {
+  margin-right: auto;
+  padding-left: 0;
+  border-left: 0;
 }
 
 .dock-dot {
@@ -108,6 +117,10 @@ body:has(.sharing-overlay) {
   transition: transform 180ms ease;
 }
 
+.connection-panel {
+  width: min(1040px, calc(100vw - 2rem));
+}
+
 .desktop-panel--open {
   pointer-events: auto;
   transform: translateX(0);
@@ -154,6 +167,10 @@ body:has(.sharing-overlay) {
   align-content: start;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.connection-grid {
+  gap: 1.25rem;
 }
 
 .room-password-card {
@@ -291,6 +308,58 @@ body:has(.sharing-overlay) {
   background: white;
   color: var(--ink);
   font: inherit;
+}
+
+.connection-panel .control-card {
+  padding: 1.4rem;
+  gap: 1rem;
+}
+
+.connection-panel .control-card h3 {
+  font-size: 1.3rem;
+}
+
+.connection-panel .control-card > p {
+  color: #514c45;
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.connection-panel .control-card > small {
+  color: #514c45;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.connection-panel .control-card label {
+  font-size: 0.84rem;
+}
+
+.connection-panel .control-card input,
+.connection-panel .control-card select {
+  min-height: 3rem;
+  font-size: 0.9rem;
+}
+
+.connection-panel .service-state {
+  font-size: 0.72rem;
+}
+
+.connection-panel .network-authority-status dt,
+.connection-panel .lan-interface-list span,
+.connection-panel .lan-interface-list code,
+.connection-panel .firewall-help code {
+  font-size: 0.75rem;
+}
+
+.connection-panel .network-authority-status dd,
+.connection-panel .firewall-help p {
+  font-size: 0.8rem;
+}
+
+.connection-panel .room-close-zone p {
+  font-size: 0.8rem;
+  line-height: 1.55;
 }
 
 .replay-settings-card {
@@ -578,130 +647,6 @@ body:has(.sharing-overlay) {
   text-overflow: ellipsis;
 }
 
-.host-connection-information {
-  padding-bottom: 1.4rem;
-}
-
-.host-connection-information > :not(.panel-heading) {
-  margin: 1.1rem 1.5rem 0;
-}
-
-.host-connection-information > label {
-  display: grid;
-  gap: 0.45rem;
-  font-size: 0.78rem;
-  font-weight: 900;
-}
-
-.host-network-room-code {
-  display: grid;
-  padding: 0.85rem;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  border: 2px solid var(--line);
-  background: var(--yellow);
-  box-shadow: 3px 3px 0 var(--line);
-  gap: 0.65rem;
-}
-
-.host-network-room-code > span {
-  font-size: 0.75rem;
-  font-weight: 900;
-}
-
-.host-network-room-code code {
-  padding: 0.3rem 0.5rem 0.3rem 0.65rem;
-  border: 2px solid var(--line);
-  background: white;
-  font-size: 1.5rem;
-  font-weight: 900;
-  letter-spacing: 0.16em;
-  text-align: center;
-}
-
-.host-network-room-code button {
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--line);
-  background: white;
-  cursor: copy;
-  font-weight: 900;
-}
-
-.host-network-room-code p {
-  margin: 0;
-  grid-column: 1 / -1;
-  color: var(--muted);
-  font-size: 0.72rem;
-}
-
-.host-connection-information select {
-  width: 100%;
-  padding: 0.7rem;
-  border: 2px solid var(--line);
-  background: white;
-}
-
-.connection-listen-diagnostic {
-  display: grid;
-  padding: 0.75rem;
-  border: 1px solid var(--line);
-  background: #eee8dc;
-  gap: 0.35rem;
-}
-
-.connection-listen-diagnostic code,
-.connection-listen-diagnostic span {
-  overflow-wrap: anywhere;
-  font-size: 0.7rem;
-}
-
-.connection-information-card {
-  display: grid;
-  padding: 0.9rem;
-  border: 2px solid var(--line);
-  background: var(--paper-light);
-  box-shadow: 3px 3px 0 var(--line);
-  gap: 0.55rem;
-}
-
-.connection-information-card h3,
-.connection-information-card p {
-  margin: 0;
-}
-
-.connection-information-card p {
-  color: var(--muted);
-  font-size: 0.72rem;
-}
-
-.connection-info-field {
-  display: grid;
-  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.connection-info-field span {
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 900;
-}
-
-.connection-info-field code {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-size: 0.7rem;
-}
-
-.connection-info-field button {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--line);
-  background: white;
-  cursor: copy;
-  font-size: 0.68rem;
-  font-weight: 800;
-}
-
 .danger-card > button {
   min-height: 2.8rem;
   border: 2px solid var(--coral-dark);
@@ -812,9 +757,24 @@ body:has(.sharing-overlay) {
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--line);
   background: var(--paper-light);
+  color: var(--ink);
   cursor: pointer;
   font-size: 0.68rem;
   font-weight: 800;
+}
+
+.source-browser__heading button:hover:not(:disabled),
+.crop-toolbar button:hover:not(:disabled) {
+  background: var(--yellow);
+}
+
+.source-browser__heading button:disabled,
+.crop-toolbar button:disabled {
+  border-color: #766f66;
+  background: #ded7cb;
+  color: #514a42;
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 .source-list {
@@ -1071,11 +1031,6 @@ body:has(.sharing-overlay) {
   gap: 0.5rem;
 }
 
-.crop-toolbar button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
 .crop-toolbar span {
   margin-left: auto;
   color: #b8b0a4;
@@ -1318,15 +1273,13 @@ body:has(.sharing-overlay) {
     flex-direction: column;
   }
 
-  .desktop-dock {
-    width: calc(100% - 1rem);
-    margin: 0.5rem;
-    justify-self: stretch;
-    justify-content: space-around;
+  .desktop-toolbar {
+    padding-left: 0.35rem;
   }
 
-  .desktop-dock button {
-    flex: 1;
+  .desktop-toolbar button {
+    min-width: 2.8rem;
+    padding-inline: 0.4rem;
   }
 
   .capture-studio {
